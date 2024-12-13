@@ -9,13 +9,18 @@ interface File {
 }
 
 export default function Slideshow() {
+  // States
   const [currentIndex, setCurrentIndex] = useState(0);
   const [timer, setTimer] = useState<NodeJS.Timeout | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [fadeOut, setFadeOut] = useState(false);
 
+  // Query
   const { data: files = [], refetch } = useQuery<File[]>({
     queryKey: ["/api/files"],
   });
 
+  // Socket effect
   useEffect(() => {
     socket.on("filesUpdated", () => {
       refetch();
@@ -25,53 +30,83 @@ export default function Slideshow() {
     };
   }, [refetch]);
 
-  useEffect(() => {
-    if (files.length > 0) {
-      showSlide(currentIndex);
-    }
-  }, [files, currentIndex]);
+  // Transition handlers
+  const handleImageLoad = () => {
+    setIsLoading(false);
+  };
 
-  const showSlide = (index: number) => {
+  const handleVideoLoad = () => {
+    setIsLoading(false);
+  };
+
+  const handleTransition = () => {
+    setFadeOut(true);
+    setTimeout(() => {
+      setCurrentIndex((prev) => (prev + 1) % files.length);
+      setFadeOut(false);
+      setIsLoading(true);
+    }, 1000);
+  };
+
+  // Timer effect
+  useEffect(() => {
+    if (!files.length) return;
+    
     if (timer) clearTimeout(timer);
     
-    // Schedule next slide
-    const currentFile = files[index];
+    const currentFile = files[currentIndex];
     if (currentFile.type === ".mp4") {
       const video = document.querySelector("video");
       if (video) {
-        video.onended = () => {
-          setCurrentIndex((prev) => (prev + 1) % files.length);
-        };
+        video.onended = handleTransition;
       }
     } else {
-      setTimer(setTimeout(() => {
-        setCurrentIndex((prev) => (prev + 1) % files.length);
-      }, 15000));
+      setTimer(setTimeout(handleTransition, 15000));
     }
-  };
 
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [currentIndex, files, timer]);
+
+  // Loading state
   if (files.length === 0) {
-    return <div className="w-screen h-screen bg-black flex items-center justify-center text-white">No content available</div>;
+    return (
+      <div className="w-screen h-screen bg-black flex items-center justify-center text-white">
+        No content available
+      </div>
+    );
   }
 
   const currentFile = files[currentIndex];
 
   return (
-    <div className="w-screen h-screen bg-black overflow-hidden">
+    <div className="w-screen h-screen bg-black overflow-hidden relative">
+      {isLoading && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+        </div>
+      )}
       {currentFile.type === ".mp4" ? (
         <video
           key={currentFile.url}
           src={currentFile.url}
-          className="w-full h-full object-contain transition-opacity duration-1000"
+          className={`w-full h-full object-contain transition-opacity duration-1000 ${
+            fadeOut ? 'opacity-0' : 'opacity-100'
+          } ${isLoading ? 'opacity-0' : ''}`}
           autoPlay
           muted
+          onLoadedData={handleVideoLoad}
         />
       ) : (
         <img
           key={currentFile.url}
           src={currentFile.url}
           alt={currentFile.name}
-          className="w-full h-full object-contain transition-opacity duration-1000"
+          className={`w-full h-full object-contain transition-opacity duration-1000 ${
+            fadeOut ? 'opacity-0' : 'opacity-100'
+          } ${isLoading ? 'opacity-0' : ''}`}
+          onLoad={handleImageLoad}
         />
       )}
     </div>

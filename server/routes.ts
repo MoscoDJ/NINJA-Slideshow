@@ -109,12 +109,16 @@ export function registerRoutes(app: Express): Server {
       
       const data = await s3.listObjects(params).promise();
       const files = data.Contents
-        ?.filter(item => item?.Size > 0)
+        ?.filter(item => {
+          // Excluir la carpeta en sí y asegurarse de que es un archivo
+          return item?.Size > 0 && item.Key !== `${FOLDER_NAME}/`;
+        })
         .map(item => ({
           name: path.basename(item.Key as string),
           url: `https://${BUCKET_NAME}.${spacesEndpoint.hostname}/${item.Key}`,
           type: path.extname(item.Key as string).toLowerCase()
-        })) || [];
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name)) || [];
       
       res.json(files);
     } catch (error: any) {
