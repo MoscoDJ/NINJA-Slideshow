@@ -11,7 +11,6 @@ interface File {
 export default function Slideshow() {
   // States
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [timer, setTimer] = useState<NodeJS.Timeout | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [fadeOut, setFadeOut] = useState(false);
 
@@ -39,7 +38,7 @@ export default function Slideshow() {
     setIsLoading(false);
   };
 
-  const handleTransition = () => {
+  const goToNextSlide = () => {
     setFadeOut(true);
     setTimeout(() => {
       setCurrentIndex((prev) => (prev + 1) % files.length);
@@ -48,26 +47,32 @@ export default function Slideshow() {
     }, 1000);
   };
 
-  // Timer effect
+  // Timer effect for automatic transitions
   useEffect(() => {
     if (!files.length) return;
     
-    if (timer) clearTimeout(timer);
-    
     const currentFile = files[currentIndex];
+    let timeoutId: NodeJS.Timeout | null = null;
+
     if (currentFile.type === ".mp4") {
       const video = document.querySelector("video");
       if (video) {
-        video.onended = handleTransition;
+        video.onended = goToNextSlide;
       }
     } else {
-      setTimer(setTimeout(handleTransition, 15000));
+      timeoutId = setTimeout(goToNextSlide, 15000);
     }
 
     return () => {
-      if (timer) clearTimeout(timer);
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      const video = document.querySelector("video");
+      if (video) {
+        video.onended = null;
+      }
     };
-  }, [currentIndex, files, timer]);
+  }, [currentIndex, files.length]);
 
   // Loading state
   if (files.length === 0) {
