@@ -172,10 +172,76 @@ export function registerRoutes(app: Express): Server {
   // Update order
   app.post('/api/order', async (req, res) => {
     try {
-      // Order update is handled client-side for now
+      const { order } = req.body;
+      if (!Array.isArray(order)) {
+        throw new Error('Invalid order format');
+      }
+
+      // Guardar el orden en un archivo JSON en el Space
+      const orderData = JSON.stringify({ order, updatedAt: new Date().toISOString() });
+      await s3.putObject({
+        Bucket: BUCKET_NAME,
+        Key: `${FOLDER_NAME}/order.json`,
+        Body: orderData,
+        ContentType: 'application/json',
+        ACL: 'public-read'
+      }).promise();
+
       io.emit('filesUpdated');
       res.json({ message: 'Order updated successfully' });
     } catch (error: any) {
+      console.error('Error updating order:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Get files list with order
+  app.get('/api/files', async (req, res) => {
+    try {
+      // Verificar bucket y credenciales...
+      const params = {
+        Bucket: BUCKET_NAME,
+        Prefix: FOLDER_NAME + '/'
+      };
+      
+      // Obtener la lista de archivos
+      const data = await s3.listObjects(params).promise();
+      let files = data.Contents
+        ?.filter(item => {
+          return item?.Size > 0 && item.Key !== `${FOLDER_NAME}/` && !item.Key?.endsWith('order.json');
+        })
+        .map(item => ({
+          name: path.basename(item.Key as string),
+          url: `https://${BUCKET_NAME}.${spacesEndpoint.hostname}/${item.Key}`,
+          type: path.extname(item.Key as string).toLowerCase()
+        })) || [];
+
+      // Intentar obtener el orden guardado
+      try {
+        const orderData = await s3.getObject({
+          Bucket: BUCKET_NAME,
+          Key: `${FOLDER_NAME}/order.json`
+        }).promise();
+
+        if (orderData.Body) {
+          const savedOrder = JSON.parse(orderData.Body.toString()).order;
+          // Ordenar los archivos según el orden guardado
+          files.sort((a, b) => {
+            const aIndex = savedOrder.indexOf(a.name);
+            const bIndex = savedOrder.indexOf(b.name);
+            if (aIndex === -1) return 1;
+            if (bIndex === -1) return -1;
+            return aIndex - bIndex;
+          });
+        }
+      } catch (orderError) {
+        console.log('No order file found, using default order');
+        files.sort((a, b) => a.name.localeCompare(b.name));
+      }
+      
+      res.json(files);
+    } catch (error: any) {
+      console.error('Error listing files:', error);
       res.status(500).json({ error: error.message });
     }
   });
