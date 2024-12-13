@@ -14,7 +14,7 @@ interface File {
   type: string;
 }
 
-function SortableItem({ file }: { file: File }) {
+function SortableItem({ file, onDelete }: { file: File; onDelete: (filename: string) => void }) {
   const {
     attributes,
     listeners,
@@ -44,7 +44,7 @@ function SortableItem({ file }: { file: File }) {
           <Button
             variant="destructive"
             size="icon"
-            onClick={() => {/* deleteMutation.mutate(file.name) */}}
+            onClick={() => onDelete(file.name)}
           >
             <Trash2 className="h-4 w-4" />
           </Button>
@@ -171,9 +171,13 @@ export default function Admin() {
       const oldIndex = files.findIndex((file) => file.name === active.id);
       const newIndex = files.findIndex((file) => file.name === over.id);
       
-      const newFiles = arrayMove(files, oldIndex, newIndex);
-      const newOrder = newFiles.map((file) => file.name);
-      updateOrderMutation.mutate(newOrder);
+      if (oldIndex !== -1 && newIndex !== -1) {
+        console.log('Reordenando archivos:', { oldIndex, newIndex });
+        const newFiles = arrayMove(files, oldIndex, newIndex);
+        const newOrder = newFiles.map((file) => file.name);
+        console.log('Nuevo orden:', newOrder);
+        updateOrderMutation.mutate(newOrder);
+      }
     }
   };
 
@@ -209,7 +213,11 @@ export default function Admin() {
         >
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {files.map((file) => (
-              <SortableItem key={file.name} file={file} />
+              <SortableItem 
+                key={file.name} 
+                file={file} 
+                onDelete={(filename) => deleteMutation.mutate(filename)} 
+              />
             ))}
           </div>
         </SortableContext>
