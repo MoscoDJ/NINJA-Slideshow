@@ -26,11 +26,13 @@ function SortableItem({ file, onDelete }: { file: File; onDelete: (filename: str
   const style = {
     transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
     transition,
-    touchAction: 'none'
+    touchAction: 'none',
+    position: 'relative' as const,
+    zIndex: transform ? 1 : 'auto'
   };
 
   return (
-    <div ref={setNodeRef} style={style} className="relative group touch-none">
+    <div ref={setNodeRef} style={style}>
       <Card className="p-2 hover:shadow-lg transition-shadow">
         <div {...attributes} {...listeners} className="absolute inset-0 z-10 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing bg-black/5 flex items-center justify-center">
           <GripVertical className="h-6 w-6 text-white drop-shadow" />
