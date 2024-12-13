@@ -162,28 +162,29 @@ export default function Admin() {
                     <div
                       ref={provided.innerRef}
                       {...provided.draggableProps}
-                      className="p-4"
+                      {...provided.dragHandleProps}
+                      className="relative group"
                     >
-                      <Card>
-                      <div {...provided.dragHandleProps} className="cursor-move mb-2">
-                        <GripVertical className="h-4 w-4" />
-                      </div>
-                      {file.type === ".mp4" ? (
-                        <video src={file.url} className="w-full aspect-video object-cover mb-4" />
-                      ) : (
-                        <img src={file.url} alt={file.name} className="w-full aspect-video object-cover mb-4" />
-                      )}
-                      <div className="flex items-center justify-between">
-                        <span className="truncate">{file.name}</span>
-                        <Button
-                          variant="destructive"
-                          size="icon"
-                          onClick={() => deleteMutation.mutate(file.name)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </Card>
+                      <Card className="p-4">
+                        <div className="absolute top-2 left-2 opacity-50 group-hover:opacity-100 transition-opacity">
+                          <GripVertical className="h-4 w-4" />
+                        </div>
+                        {file.type === ".mp4" ? (
+                          <video src={file.url} className="w-full aspect-video object-cover mb-4" />
+                        ) : (
+                          <img src={file.url} alt={file.name} className="w-full aspect-video object-cover mb-4" />
+                        )}
+                        <div className="flex items-center justify-between">
+                          <span className="truncate">{file.name}</span>
+                          <Button
+                            variant="destructive"
+                            size="icon"
+                            onClick={() => deleteMutation.mutate(file.name)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </Card>
                     </div>
                   )}
                 </Draggable>
