@@ -25,8 +25,8 @@ const region = 'sfo3';
 // Configuración de AWS SDK con debugging
 const s3 = new aws.S3({
   endpoint: spacesEndpoint,
-  accessKeyId: process.env.SPACES_KEY,
-  secretAccessKey: process.env.SPACES_ACCESS_KEY,
+  accessKeyId: 'DO00W9GMLURV8XLYH79K',
+  secretAccessKey: 'oWPynHfA75gTmd1AH6qZ4RwRbRFPXOOm5X+ynIWC4jo',
   region: region,
   signatureVersion: 'v4',
   s3ForcePathStyle: true,
