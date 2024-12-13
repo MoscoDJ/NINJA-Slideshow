@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Upload, Trash2, GripVertical } from "lucide-react";
-import { DragDropContext, Droppable, Draggable, DropResult } from "react-beautiful-dnd";
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 
 interface File {
   name: string;
@@ -13,10 +14,57 @@ interface File {
   type: string;
 }
 
+function SortableItem({ file }: { file: File }) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({ id: file.name });
+
+  const style = transform ? {
+    transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+    transition,
+  } : undefined;
+
+  return (
+    <div ref={setNodeRef} style={style} className="relative group">
+      <Card className="p-4">
+        <div {...attributes} {...listeners} className="absolute top-2 left-2 opacity-50 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing">
+          <GripVertical className="h-4 w-4" />
+        </div>
+        {file.type === ".mp4" ? (
+          <video src={file.url} className="w-full aspect-video object-cover mb-4" />
+        ) : (
+          <img src={file.url} alt={file.name} className="w-full aspect-video object-cover mb-4" />
+        )}
+        <div className="flex items-center justify-between">
+          <span className="truncate">{file.name}</span>
+          <Button
+            variant="destructive"
+            size="icon"
+            onClick={() => {/* deleteMutation.mutate(file.name) */}}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 export default function Admin() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
   const { data: files = [], refetch } = useQuery<File[]>({
     queryKey: ["/api/files"],
   });
@@ -46,7 +94,7 @@ export default function Admin() {
         title: "Success",
         description: "File uploaded successfully",
       });
-      queryClient.invalidateQueries(["/api/files"]);
+      queryClient.invalidateQueries({ queryKey: ["/api/files"] });
     },
     onError: (error: Error) => {
       toast({
@@ -70,7 +118,7 @@ export default function Admin() {
         title: "Success",
         description: "File deleted successfully",
       });
-      queryClient.invalidateQueries(["/api/files"]);
+      queryClient.invalidateQueries({ queryKey: ["/api/files"] });
     },
     onError: (error: Error) => {
       toast({
@@ -94,7 +142,7 @@ export default function Admin() {
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(["/api/files"]);
+      queryClient.invalidateQueries({ queryKey: ["/api/files"] });
       toast({
         title: "Success",
         description: "Order updated successfully",
@@ -116,15 +164,17 @@ export default function Admin() {
     }
   };
 
-  const handleDragEnd = (result: DropResult) => {
-    if (!result.destination) return;
-
-    const items = Array.from(files);
-    const [reorderedItem] = items.splice(result.source.index, 1);
-    items.splice(result.destination.index, 0, reorderedItem);
-
-    const newOrder = items.map((item) => item.name);
-    updateOrderMutation.mutate(newOrder);
+  const handleDragEnd = (event: any) => {
+    const { active, over } = event;
+    
+    if (active.id !== over.id) {
+      const oldIndex = files.findIndex((file) => file.name === active.id);
+      const newIndex = files.findIndex((file) => file.name === over.id);
+      
+      const newFiles = arrayMove(files, oldIndex, newIndex);
+      const newOrder = newFiles.map((file) => file.name);
+      updateOrderMutation.mutate(newOrder);
+    }
   };
 
   return (
@@ -148,52 +198,22 @@ export default function Admin() {
         </div>
       </div>
 
-      <DragDropContext onDragEnd={handleDragEnd}>
-        <Droppable droppableId="files">
-          {(provided) => (
-            <div
-              {...provided.droppableProps}
-              ref={provided.innerRef}
-              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"
-            >
-              {files.map((file, index) => (
-                <Draggable key={file.name} draggableId={file.name} index={index}>
-                  {(provided) => (
-                    <div
-                      ref={provided.innerRef}
-                      {...provided.draggableProps}
-                      {...provided.dragHandleProps}
-                      className="relative group"
-                    >
-                      <Card className="p-4">
-                        <div className="absolute top-2 left-2 opacity-50 group-hover:opacity-100 transition-opacity">
-                          <GripVertical className="h-4 w-4" />
-                        </div>
-                        {file.type === ".mp4" ? (
-                          <video src={file.url} className="w-full aspect-video object-cover mb-4" />
-                        ) : (
-                          <img src={file.url} alt={file.name} className="w-full aspect-video object-cover mb-4" />
-                        )}
-                        <div className="flex items-center justify-between">
-                          <span className="truncate">{file.name}</span>
-                          <Button
-                            variant="destructive"
-                            size="icon"
-                            onClick={() => deleteMutation.mutate(file.name)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </Card>
-                    </div>
-                  )}
-                </Draggable>
-              ))}
-              {provided.placeholder}
-            </div>
-          )}
-        </Droppable>
-      </DragDropContext>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext 
+          items={files.map(file => file.name)}
+          strategy={verticalListSortingStrategy}
+        >
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {files.map((file) => (
+              <SortableItem key={file.name} file={file} />
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
     </div>
   );
 }
