@@ -16,3 +16,4 @@ coverage
 .vscode/
 build/
 *.log
+*.bak
