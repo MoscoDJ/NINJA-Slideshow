@@ -56,11 +56,23 @@ const upload = multer({
 
 export function registerRoutes(app: Express): Server {
   const httpServer = createServer(app);
+  // Configuración de CORS para Socket.IO y Express
+  const corsOptions = {
+    origin: "*",
+    methods: ["GET", "POST", "DELETE"],
+    allowedHeaders: ["Content-Type"]
+  };
+
   const io = new SocketServer(httpServer, {
-    cors: {
-      origin: "*",
-      methods: ["GET", "POST"]
-    }
+    cors: corsOptions
+  });
+
+  // Habilitar CORS para todas las rutas de Express
+  app.use((req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET, POST, DELETE");
+    res.header("Access-Control-Allow-Headers", "Content-Type");
+    next();
   });
 
   // Socket.IO connection handling

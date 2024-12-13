@@ -29,21 +29,22 @@ function SortableItem({ file, onDelete }: { file: File; onDelete: (filename: str
   } : undefined;
 
   return (
-    <div ref={setNodeRef} style={style} className="relative group">
-      <Card className="p-4">
-        <div {...attributes} {...listeners} className="absolute top-2 left-2 opacity-50 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing">
-          <GripVertical className="h-4 w-4" />
+    <div ref={setNodeRef} style={style} className="relative group touch-none">
+      <Card className="p-2 hover:shadow-lg transition-shadow">
+        <div {...attributes} {...listeners} className="absolute inset-0 z-10 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing bg-black/5 flex items-center justify-center">
+          <GripVertical className="h-6 w-6 text-white drop-shadow" />
         </div>
         {file.type === ".mp4" ? (
-          <video src={file.url} className="w-full aspect-video object-cover mb-4" />
+          <video src={file.url} className="w-full h-32 object-cover rounded-sm mb-2" />
         ) : (
-          <img src={file.url} alt={file.name} className="w-full aspect-video object-cover mb-4" />
+          <img src={file.url} alt={file.name} className="w-full h-32 object-cover rounded-sm mb-2" />
         )}
-        <div className="flex items-center justify-between">
-          <span className="truncate">{file.name}</span>
+        <div className="flex items-center justify-between gap-2 px-1">
+          <span className="text-sm truncate flex-1">{file.name}</span>
           <Button
             variant="destructive"
             size="icon"
+            className="h-7 w-7"
             onClick={() => onDelete(file.name)}
           >
             <Trash2 className="h-4 w-4" />
@@ -211,7 +212,7 @@ export default function Admin() {
           items={files.map(file => file.name)}
           strategy={verticalListSortingStrategy}
         >
-          <div className="flex flex-col space-y-4 max-w-4xl mx-auto">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-w-7xl mx-auto">
             {files.map((file) => (
               <SortableItem 
                 key={file.name} 
