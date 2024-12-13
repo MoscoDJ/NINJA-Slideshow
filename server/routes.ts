@@ -19,15 +19,31 @@ if (!process.env.SPACES_KEY || !process.env.SPACES_SECRET_KEY) {
 }
 
 // Configurar endpoint y región
-const spacesEndpoint = new aws.Endpoint('nyc3.digitaloceanspaces.com');
-const region = 'nyc3';
+const spacesEndpoint = new aws.Endpoint('sfo3.digitaloceanspaces.com');
+const region = 'sfo3';
 
+// Configuración de AWS SDK con debugging
 const s3 = new aws.S3({
   endpoint: spacesEndpoint,
   accessKeyId: process.env.SPACES_KEY,
-  secretAccessKey: process.env.SPACES_SECRET_KEY,
+  secretAccessKey: process.env.SPACES_ACCESS_KEY,
   region: region,
-  s3ForcePathStyle: false
+  signatureVersion: 'v4',
+  s3ForcePathStyle: true,
+  computeChecksums: true,
+  logger: console,
+  httpOptions: {
+    timeout: 10000,
+    agent: false
+  }
+});
+
+// Log de configuración (sin exponer credenciales)
+console.log('Configuración de S3:', {
+  endpoint: spacesEndpoint.href,
+  region: region,
+  hasAccessKeyId: !!process.env.SPACES_KEY,
+  hasSecretAccessKey: !!process.env.SPACES_SECRET_KEY
 });
 
 // Multer config
