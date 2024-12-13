@@ -159,11 +159,12 @@ export default function Admin() {
               {files.map((file, index) => (
                 <Draggable key={file.name} draggableId={file.name} index={index}>
                   {(provided) => (
-                    <Card
+                    <div
                       ref={provided.innerRef}
                       {...provided.draggableProps}
                       className="p-4"
                     >
+                      <Card>
                       <div {...provided.dragHandleProps} className="cursor-move mb-2">
                         <GripVertical className="h-4 w-4" />
                       </div>
@@ -183,6 +184,7 @@ export default function Admin() {
                         </Button>
                       </div>
                     </Card>
+                    </div>
                   )}
                 </Draggable>
               ))}
