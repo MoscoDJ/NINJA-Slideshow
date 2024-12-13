@@ -122,8 +122,10 @@ export function registerRoutes(app: Express): Server {
       const data = await s3.listObjects(params).promise();
       const files = data.Contents
         ?.filter(item => {
-          // Excluir la carpeta en sí y asegurarse de que es un archivo
-          return item?.Size > 0 && item.Key !== `${FOLDER_NAME}/`;
+          // Excluir la carpeta en sí, el archivo order.json y asegurarse de que es un archivo
+          return item?.Size > 0 && 
+                 item.Key !== `${FOLDER_NAME}/` && 
+                 !item.Key?.endsWith('order.json');
         })
         .map(item => ({
           name: path.basename(item.Key as string),

@@ -6,7 +6,7 @@ import { Card } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Upload, Trash2, GripVertical } from "lucide-react";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
-import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, rectSwappingStrategy } from '@dnd-kit/sortable';
 
 interface File {
   name: string;
@@ -23,10 +23,11 @@ function SortableItem({ file, onDelete }: { file: File; onDelete: (filename: str
     transition,
   } = useSortable({ id: file.name });
 
-  const style = transform ? {
-    transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+  const style = {
+    transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
     transition,
-  } : undefined;
+    touchAction: 'none'
+  };
 
   return (
     <div ref={setNodeRef} style={style} className="relative group touch-none">
@@ -210,7 +211,7 @@ export default function Admin() {
       >
         <SortableContext 
           items={files.map(file => file.name)}
-          strategy={verticalListSortingStrategy}
+          strategy={rectSwappingStrategy}
         >
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-w-7xl mx-auto">
             {files.map((file) => (
