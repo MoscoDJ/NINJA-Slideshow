@@ -1,3 +1,4 @@
+// server/routes.ts
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { Server as SocketServer } from "socket.io";
@@ -5,34 +6,28 @@ import multer from "multer";
 import aws from "aws-sdk";
 import path from "path";
 
-const BUCKET_NAME = process.env.BUCKET_NAME;
+const BUCKET_NAME = process.env.BUCKET_NAME || 'ninjacdn';
 const FOLDER_NAME = 'slideshow';
 
-// Verificar configuración requerida
-if (!BUCKET_NAME || !process.env.SPACES_ACCESS_KEY || !process.env.SPACES_SECRET_KEY || !process.env.SPACES_ENDPOINT) {
-  console.error('ERROR: Falta configuración de Digital Ocean Spaces');
-  console.error('Required environment variables:');
-  console.error('- BUCKET_NAME:', BUCKET_NAME ? '✓' : '✗');
-  console.error('- SPACES_ACCESS_KEY:', process.env.SPACES_ACCESS_KEY ? '✓' : '✗');
+// Verificar y configurar las credenciales
+if (!process.env.SPACES_KEY || !process.env.SPACES_SECRET_KEY) {
+  console.error('ERROR: Faltan las credenciales de Digital Ocean Spaces');
+  console.error('Credenciales requeridas:');
+  console.error('- SPACES_KEY:', process.env.SPACES_KEY ? '✓' : '✗');
   console.error('- SPACES_SECRET_KEY:', process.env.SPACES_SECRET_KEY ? '✓' : '✗');
-  console.error('- SPACES_ENDPOINT:', process.env.SPACES_ENDPOINT ? '✓' : '✗');
-  throw new Error('Missing required Digital Ocean Spaces configuration');
+  throw new Error('Faltan las credenciales de Digital Ocean Spaces');
 }
 
-// Digital Ocean Spaces config
-const spacesEndpoint = new aws.Endpoint(process.env.SPACES_ENDPOINT);
-// Configurar las credenciales de AWS globalmente
-aws.config.update({
-  accessKeyId: process.env.SPACES_ACCESS_KEY,
-  secretAccessKey: process.env.SPACES_SECRET_KEY,
-  region: process.env.SPACES_ENDPOINT?.split('.')[0] || 'us-east-1'
-});
+// Configurar endpoint y región
+const spacesEndpoint = new aws.Endpoint('nyc3.digitaloceanspaces.com');
+const region = 'nyc3';
 
 const s3 = new aws.S3({
   endpoint: spacesEndpoint,
-  s3ForcePathStyle: true, // Necesario para Digital Ocean Spaces
-  signatureVersion: 'v4', // Usar la última versión de firma
-  region: process.env.SPACES_ENDPOINT?.split('.')[0] || 'us-east-1'
+  accessKeyId: process.env.SPACES_KEY,
+  secretAccessKey: process.env.SPACES_SECRET_KEY,
+  region: region,
+  s3ForcePathStyle: false
 });
 
 // Multer config
@@ -62,14 +57,13 @@ export function registerRoutes(app: Express): Server {
   app.get('/api/files', async (req, res) => {
     try {
       // Verificar configuración
-      if (!process.env.SPACES_ACCESS_KEY || !process.env.SPACES_SECRET_KEY || !process.env.SPACES_ENDPOINT || !BUCKET_NAME) {
+      if (!process.env.SPACES_KEY || !process.env.SPACES_SECRET_KEY || !BUCKET_NAME) {
         console.error('Error: Faltan variables de entorno necesarias');
         return res.status(500).json({ 
           error: 'Configuración incompleta',
           details: {
-            SPACES_ACCESS_KEY: !!process.env.SPACES_ACCESS_KEY,
+            SPACES_KEY: !!process.env.SPACES_KEY,
             SPACES_SECRET_KEY: !!process.env.SPACES_SECRET_KEY,
-            SPACES_ENDPOINT: !!process.env.SPACES_ENDPOINT,
             BUCKET_NAME: !!BUCKET_NAME
           }
         });
