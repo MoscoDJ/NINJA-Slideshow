@@ -191,21 +191,37 @@ export function registerRoutes(app: Express): Server {
         throw new Error('Invalid order format');
       }
 
+      console.log('Recibido nuevo orden:', order);
+
       // Guardar el orden en un archivo JSON en el Space
-      const orderData = JSON.stringify({ order, updatedAt: new Date().toISOString() });
-      await s3.putObject({
+      const orderData = JSON.stringify({ 
+        order, 
+        updatedAt: new Date().toISOString() 
+      }, null, 2);
+
+      const putObjectParams = {
         Bucket: BUCKET_NAME,
         Key: `${FOLDER_NAME}/order.json`,
         Body: orderData,
         ContentType: 'application/json',
         ACL: 'public-read'
-      }).promise();
+      };
+
+      console.log('Guardando orden en S3:', putObjectParams);
+      await s3.putObject(putObjectParams).promise();
+      console.log('Orden guardado exitosamente');
 
       io.emit('filesUpdated');
-      res.json({ message: 'Order updated successfully' });
+      res.json({ 
+        message: 'Order updated successfully',
+        order 
+      });
     } catch (error: any) {
       console.error('Error updating order:', error);
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ 
+        error: error.message,
+        details: error.stack 
+      });
     }
   });
 

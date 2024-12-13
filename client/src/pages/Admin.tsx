@@ -166,7 +166,7 @@ export default function Admin() {
     }
   };
 
-  const handleDragEnd = (event: any) => {
+  const handleDragEnd = async (event: any) => {
     const { active, over } = event;
     
     if (active.id !== over.id) {
@@ -174,11 +174,15 @@ export default function Admin() {
       const newIndex = files.findIndex((file) => file.name === over.id);
       
       if (oldIndex !== -1 && newIndex !== -1) {
-        console.log('Reordenando archivos:', { oldIndex, newIndex });
         const newFiles = arrayMove(files, oldIndex, newIndex);
         const newOrder = newFiles.map((file) => file.name);
-        console.log('Nuevo orden:', newOrder);
-        updateOrderMutation.mutate(newOrder);
+        
+        try {
+          await updateOrderMutation.mutateAsync(newOrder);
+          await queryClient.invalidateQueries({ queryKey: ["/api/files"] });
+        } catch (error) {
+          console.error('Error al actualizar el orden:', error);
+        }
       }
     }
   };
