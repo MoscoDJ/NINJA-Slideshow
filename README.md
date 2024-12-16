@@ -21,7 +21,7 @@ Sistema de slideshow digital con gestión de contenidos en tiempo real usando Di
 
 1. Clonar el repositorio:
 ```bash
-git clone <repository-url>
+git clone https://github.com/MoscoDJ/NINJA-Slideshow.git
 cd digital-slideshow
 ```
 
