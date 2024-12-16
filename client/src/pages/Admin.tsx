@@ -34,8 +34,10 @@ function SortableItem({ file, onDelete }: { file: File; onDelete: (filename: str
   return (
     <div ref={setNodeRef} style={style}>
       <Card className="p-2 hover:shadow-lg transition-shadow relative">
-        <div {...attributes} {...listeners} className="absolute inset-0 z-10 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing bg-black/5 flex items-center justify-center pointer-events-none">
-          <GripVertical className="h-6 w-6 text-white drop-shadow pointer-events-none" />
+        <div {...attributes} {...listeners} className="absolute inset-0 z-10 opacity-0 hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing bg-black/5">
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <GripVertical className="h-6 w-6 text-white drop-shadow" />
+          </div>
         </div>
         <div className="relative z-20">
           {file.type === ".mp4" ? (
