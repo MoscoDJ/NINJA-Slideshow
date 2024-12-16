@@ -33,25 +33,27 @@ function SortableItem({ file, onDelete }: { file: File; onDelete: (filename: str
 
   return (
     <div ref={setNodeRef} style={style}>
-      <Card className="p-2 hover:shadow-lg transition-shadow">
-        <div {...attributes} {...listeners} className="absolute inset-0 z-10 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing bg-black/5 flex items-center justify-center">
-          <GripVertical className="h-6 w-6 text-white drop-shadow" />
+      <Card className="p-2 hover:shadow-lg transition-shadow relative">
+        <div {...attributes} {...listeners} className="absolute inset-0 z-10 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing bg-black/5 flex items-center justify-center pointer-events-none">
+          <GripVertical className="h-6 w-6 text-white drop-shadow pointer-events-none" />
         </div>
-        {file.type === ".mp4" ? (
-          <video src={file.url} className="w-full h-32 object-cover rounded-sm mb-2" />
-        ) : (
-          <img src={file.url} alt={file.name} className="w-full h-32 object-cover rounded-sm mb-2" />
-        )}
-        <div className="flex items-center justify-between gap-2 px-1">
-          <span className="text-sm truncate flex-1">{file.name}</span>
-          <Button
-            variant="destructive"
-            size="icon"
-            className="h-7 w-7"
-            onClick={() => onDelete(file.name)}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+        <div className="relative z-20">
+          {file.type === ".mp4" ? (
+            <video src={file.url} className="w-full h-32 object-cover rounded-sm mb-2" />
+          ) : (
+            <img src={file.url} alt={file.name} className="w-full h-32 object-cover rounded-sm mb-2" />
+          )}
+          <div className="flex items-center justify-between gap-2 px-1">
+            <span className="text-sm truncate flex-1">{file.name}</span>
+            <Button
+              variant="destructive"
+              size="icon"
+              className="h-7 w-7 relative z-30"
+              onClick={() => onDelete(file.name)}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </Card>
     </div>
