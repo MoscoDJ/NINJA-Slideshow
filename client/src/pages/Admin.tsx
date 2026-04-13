@@ -4,8 +4,19 @@ import { socket } from "@/lib/socket";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
-import { Upload, Trash2, GripVertical, LogOut, X } from "lucide-react";
+import {
+  Upload,
+  Trash2,
+  GripVertical,
+  LogOut,
+  X,
+  Loader2,
+  Info,
+  Image,
+  Film,
+} from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -29,16 +40,18 @@ interface SlideFile {
   type: string;
 }
 
-const MULTIPART_THRESHOLD = 100 * 1024 * 1024; // 100 MB
-const PART_SIZE = 10 * 1024 * 1024; // 10 MB
+const MULTIPART_THRESHOLD = 100 * 1024 * 1024;
+const PART_SIZE = 10 * 1024 * 1024;
 const MAX_CONCURRENT_PARTS = 4;
 
 function SortableItem({
   file,
   onDelete,
+  deleting,
 }: {
   file: SlideFile;
   onDelete: (filename: string) => void;
+  deleting: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition } =
     useSortable({ id: file.name });
@@ -53,47 +66,64 @@ function SortableItem({
     zIndex: transform ? 1 : "auto",
   };
 
+  const isVideo = file.type === ".mp4" || file.type === ".webm";
+
   return (
     <div ref={setNodeRef} style={style}>
-      <Card className="p-2 hover:shadow-lg transition-shadow relative">
-        <div
-          {...attributes}
-          {...listeners}
-          className="absolute inset-0 z-10 opacity-0 hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing bg-black/5"
-        >
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <GripVertical className="h-6 w-6 text-white drop-shadow" />
+      <Card className="group overflow-hidden bg-neutral-900 border-neutral-800 hover:border-[#ec1c24]/40 transition-colors">
+        <div className="relative">
+          <div
+            {...attributes}
+            {...listeners}
+            className="absolute inset-0 z-10 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing bg-black/30"
+          >
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <GripVertical className="h-8 w-8 text-white drop-shadow-lg" />
+            </div>
           </div>
-        </div>
-        <div className="relative z-20">
-          {file.type === ".mp4" || file.type === ".webm" ? (
+          {isVideo ? (
             <video
               src={file.url}
-              className="w-full h-32 object-cover rounded-sm mb-2"
+              className="w-full h-36 object-cover"
             />
           ) : (
             <img
               src={file.url}
               alt={file.name}
-              className="w-full h-32 object-cover rounded-sm mb-2"
+              className="w-full h-36 object-cover"
             />
           )}
-          <div className="flex items-center justify-between gap-2 px-1">
-            <span className="text-sm truncate flex-1">{file.name}</span>
-            <Button
-              variant="destructive"
-              size="icon"
-              className="h-7 w-7 relative z-30"
-              onClick={() => onDelete(file.name)}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
+          <div className="absolute top-2 left-2 z-20">
+            <span className="inline-flex items-center gap-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white/80 uppercase tracking-wider">
+              {isVideo ? <Film className="h-3 w-3" /> : <Image className="h-3 w-3" />}
+              {file.type.replace(".", "")}
+            </span>
           </div>
+        </div>
+        <div className="flex items-center justify-between gap-2 px-3 py-2">
+          <span className="text-sm text-neutral-300 truncate flex-1">
+            {file.name}
+          </span>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 relative z-30 text-neutral-500 hover:text-[#ec1c24] hover:bg-[#ec1c24]/10"
+            onClick={() => onDelete(file.name)}
+            disabled={deleting}
+          >
+            {deleting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Trash2 className="h-4 w-4" />
+            )}
+          </Button>
         </div>
       </Card>
     </div>
   );
 }
+
+// --- Auth wrapper ---
 
 export default function Admin() {
   const {
@@ -107,8 +137,14 @@ export default function Admin() {
 
   if (authLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen flex flex-col items-center justify-center bg-black gap-4">
+        <img
+          src="/logo.png"
+          alt="NINJA"
+          className="h-16 w-auto opacity-60"
+          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+        />
+        <Loader2 className="h-8 w-8 animate-spin text-[#ec1c24]" />
       </div>
     );
   }
@@ -119,6 +155,8 @@ export default function Admin() {
 
   return <AdminPanel />;
 }
+
+// --- API helper ---
 
 async function apiJson(url: string, body: Record<string, unknown>) {
   const res = await fetch(url, {
@@ -134,11 +172,14 @@ async function apiJson(url: string, body: Record<string, unknown>) {
   return res.json();
 }
 
+// --- Admin Panel ---
+
 function AdminPanel() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [uploadFileName, setUploadFileName] = useState("");
+  const [deletingFile, setDeletingFile] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const sensors = useSensors(
@@ -148,18 +189,20 @@ function AdminPanel() {
     }),
   );
 
-  const { data: files = [], refetch } = useQuery<SlideFile[]>({
+  const {
+    data: files = [],
+    refetch,
+    isLoading: filesLoading,
+  } = useQuery<SlideFile[]>({
     queryKey: ["/api/files"],
   });
 
   useEffect(() => {
-    socket.on("filesUpdated", () => {
-      refetch();
-    });
-    return () => {
-      socket.off("filesUpdated");
-    };
+    socket.on("filesUpdated", () => refetch());
+    return () => { socket.off("filesUpdated"); };
   }, [refetch]);
+
+  // --- Upload logic ---
 
   const uploadFile = useCallback(
     async (file: File) => {
@@ -170,7 +213,6 @@ function AdminPanel() {
 
       try {
         if (file.size < MULTIPART_THRESHOLD) {
-          // Simple presigned PUT
           const { url, key } = await apiJson("/api/upload/presign", {
             filename: file.name,
             contentType: file.type,
@@ -180,11 +222,9 @@ function AdminPanel() {
             const xhr = new XMLHttpRequest();
             xhr.open("PUT", url);
             xhr.setRequestHeader("Content-Type", file.type);
-
             xhr.upload.onprogress = (e) => {
-              if (e.lengthComputable) {
+              if (e.lengthComputable)
                 setUploadProgress(Math.round((e.loaded / e.total) * 100));
-              }
             };
             xhr.onload = () =>
               xhr.status >= 200 && xhr.status < 300
@@ -197,7 +237,6 @@ function AdminPanel() {
 
           await apiJson("/api/upload/confirm", { key });
         } else {
-          // Multipart upload
           const { uploadId, key } = await apiJson(
             "/api/upload/init-multipart",
             { filename: file.name, contentType: file.type },
@@ -207,7 +246,6 @@ function AdminPanel() {
           const completedParts: { partNumber: number; etag: string }[] = [];
           let bytesUploaded = 0;
 
-          // Upload parts with bounded concurrency
           const queue = Array.from({ length: totalParts }, (_, i) => i + 1);
           const workers = Array.from(
             { length: Math.min(MAX_CONCURRENT_PARTS, totalParts) },
@@ -228,19 +266,16 @@ function AdminPanel() {
                 const etag = await new Promise<string>((resolve, reject) => {
                   const xhr = new XMLHttpRequest();
                   xhr.open("PUT", url);
-
                   xhr.upload.onprogress = (e) => {
                     if (e.lengthComputable) {
-                      const partBytes = bytesUploaded + e.loaded;
                       setUploadProgress(
-                        Math.round((partBytes / file.size) * 100),
+                        Math.round(((bytesUploaded + e.loaded) / file.size) * 100),
                       );
                     }
                   };
                   xhr.onload = () => {
                     if (xhr.status >= 200 && xhr.status < 300) {
-                      const raw = xhr.getResponseHeader("ETag");
-                      resolve(raw || "");
+                      resolve(xhr.getResponseHeader("ETag") || "");
                     } else {
                       reject(new Error(`Part ${partNumber} failed (${xhr.status})`));
                     }
@@ -260,9 +295,7 @@ function AdminPanel() {
           await Promise.all(workers);
 
           if (abort.signal.aborted) {
-            await apiJson("/api/upload/abort", { key, uploadId }).catch(
-              () => {},
-            );
+            await apiJson("/api/upload/abort", { key, uploadId }).catch(() => {});
             return;
           }
 
@@ -275,7 +308,7 @@ function AdminPanel() {
         }
 
         setUploadProgress(100);
-        toast({ title: "Éxito", description: "Archivo subido correctamente" });
+        toast({ title: "Listo", description: "Archivo subido correctamente" });
         queryClient.invalidateQueries({ queryKey: ["/api/files"] });
       } catch (err: any) {
         if (abort.signal.aborted) return;
@@ -302,8 +335,11 @@ function AdminPanel() {
     toast({ title: "Cancelado", description: "Upload cancelado" });
   };
 
+  // --- Delete ---
+
   const deleteMutation = useMutation({
     mutationFn: async (filename: string) => {
+      setDeletingFile(filename);
       const response = await fetch(`/api/files/${filename}`, {
         method: "DELETE",
         credentials: "include",
@@ -312,17 +348,16 @@ function AdminPanel() {
       return response.json();
     },
     onSuccess: () => {
-      toast({ title: "Éxito", description: "Archivo eliminado" });
+      toast({ title: "Listo", description: "Archivo eliminado" });
       queryClient.invalidateQueries({ queryKey: ["/api/files"] });
     },
     onError: (error: Error) => {
-      toast({
-        title: "Error",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: error.message, variant: "destructive" });
     },
+    onSettled: () => setDeletingFile(null),
   });
+
+  // --- Order ---
 
   const updateOrderMutation = useMutation({
     mutationFn: async (newOrder: string[]) => {
@@ -337,14 +372,10 @@ function AdminPanel() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/files"] });
-      toast({ title: "Éxito", description: "Orden actualizado" });
+      toast({ title: "Listo", description: "Orden actualizado" });
     },
     onError: (error: Error) => {
-      toast({
-        title: "Error",
-        description: error.message,
-        variant: "destructive",
-      });
+      toast({ title: "Error", description: error.message, variant: "destructive" });
     },
   });
 
@@ -382,16 +413,70 @@ function AdminPanel() {
   const uploading = uploadProgress !== null;
 
   return (
-    <div className="container mx-auto p-8">
-      <div className="mb-8">
-        <div className="flex items-center justify-between mb-4">
-          <h1 className="text-4xl font-bold">Slideshow Admin</h1>
-          <Button variant="outline" size="sm" onClick={handleLogout}>
+    <div className="min-h-screen bg-black text-white">
+      {/* Header */}
+      <header className="border-b border-neutral-800 bg-neutral-950">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <img
+              src="/logo.png"
+              alt="NINJA"
+              className="h-10 w-auto"
+              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+            />
+            <div>
+              <h1 className="text-lg font-bold tracking-tight leading-tight">
+                Slideshow Admin
+              </h1>
+              <p className="text-xs text-neutral-500">
+                {files.length} archivo{files.length !== 1 ? "s" : ""}
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-neutral-400 hover:text-white hover:bg-neutral-800"
+            onClick={handleLogout}
+          >
             <LogOut className="mr-2 h-4 w-4" />
-            Cerrar sesión
+            Salir
           </Button>
         </div>
-        <div className="flex items-center gap-4">
+      </header>
+
+      <main className="max-w-7xl mx-auto px-6 py-6 space-y-6">
+        {/* Instructions (shown when empty) */}
+        {!filesLoading && files.length === 0 && (
+          <div className="rounded-lg border border-neutral-800 bg-neutral-900/50 p-6 space-y-3">
+            <div className="flex items-start gap-3">
+              <Info className="h-5 w-5 text-[#ec1c24] mt-0.5 shrink-0" />
+              <div className="space-y-2 text-sm text-neutral-400">
+                <p className="text-white font-medium">
+                  Bienvenido al panel de administracion
+                </p>
+                <ul className="list-disc list-inside space-y-1">
+                  <li>
+                    Sube imagenes (JPEG, PNG, GIF, WebP) o videos (MP4, WebM)
+                    usando el boton <strong className="text-white">Subir archivo</strong>
+                  </li>
+                  <li>
+                    Arrastra las tarjetas para reordenar el contenido del slideshow
+                  </li>
+                  <li>
+                    Los cambios se reflejan en tiempo real en todas las pantallas conectadas
+                  </li>
+                  <li>
+                    Archivos de hasta 2 GB son soportados
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Actions bar */}
+        <div className="flex items-center gap-4 flex-wrap">
           <input
             type="file"
             id="fileInput"
@@ -402,53 +487,66 @@ function AdminPanel() {
           <Button
             onClick={() => document.getElementById("fileInput")?.click()}
             disabled={uploading}
+            className="bg-[#ec1c24] hover:bg-[#d01820] text-white font-medium"
           >
-            <Upload className="mr-2 h-4 w-4" />
-            Upload File
+            {uploading ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Upload className="mr-2 h-4 w-4" />
+            )}
+            Subir archivo
           </Button>
+
+          {uploading && (
+            <div className="flex-1 min-w-[200px] max-w-md space-y-1.5">
+              <div className="flex items-center justify-between text-xs text-neutral-400">
+                <span className="truncate mr-2">{uploadFileName}</span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-white font-medium">{uploadProgress}%</span>
+                  <button
+                    onClick={cancelUpload}
+                    className="text-neutral-500 hover:text-[#ec1c24] transition-colors"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+              <Progress value={uploadProgress ?? 0} className="h-1.5" />
+            </div>
+          )}
         </div>
 
-        {uploading && (
-          <div className="mt-4 max-w-md space-y-2">
-            <div className="flex items-center justify-between text-sm">
-              <span className="truncate mr-2">{uploadFileName}</span>
-              <div className="flex items-center gap-2 shrink-0">
-                <span>{uploadProgress}%</span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6"
-                  onClick={cancelUpload}
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-            <Progress value={uploadProgress ?? 0} />
-          </div>
-        )}
-      </div>
+        <Separator className="bg-neutral-800" />
 
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        onDragEnd={handleDragEnd}
-      >
-        <SortableContext
-          items={files.map((file) => file.name)}
-          strategy={rectSwappingStrategy}
-        >
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-w-7xl mx-auto">
-            {files.map((file) => (
-              <SortableItem
-                key={file.name}
-                file={file}
-                onDelete={(filename) => deleteMutation.mutate(filename)}
-              />
-            ))}
+        {/* Files grid */}
+        {filesLoading ? (
+          <div className="flex justify-center py-20">
+            <Loader2 className="h-8 w-8 animate-spin text-[#ec1c24]" />
           </div>
-        </SortableContext>
-      </DndContext>
+        ) : (
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={files.map((file) => file.name)}
+              strategy={rectSwappingStrategy}
+            >
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {files.map((file) => (
+                  <SortableItem
+                    key={file.name}
+                    file={file}
+                    onDelete={(filename) => deleteMutation.mutate(filename)}
+                    deleting={deletingFile === file.name}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
+        )}
+      </main>
     </div>
   );
 }

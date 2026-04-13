@@ -90,16 +90,19 @@ export function registerRoutes(app: Express): Server {
 
   app.post("/api/login", (req, res) => {
     const { password } = req.body;
-    const adminPassword = process.env.ADMIN_PASSWORD;
+    const passwords = [
+      process.env.ADMIN_PASSWORD,
+      process.env.ADMIN2_PASSWORD,
+    ].filter(Boolean);
 
-    if (!adminPassword) {
-      console.error("ADMIN_PASSWORD environment variable is not set");
+    if (passwords.length === 0) {
+      console.error("No ADMIN_PASSWORD environment variables are set");
       return res
         .status(500)
         .json({ error: "Configuración de autenticación incompleta" });
     }
 
-    if (password === adminPassword) {
+    if (passwords.includes(password)) {
       req.session.isAdmin = true;
       return res.json({ message: "Login exitoso" });
     }
