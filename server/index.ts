@@ -1,8 +1,32 @@
 import express, { type Request, Response, NextFunction } from "express";
+import session from "express-session";
+import createMemoryStore from "memorystore";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 
 const app = express();
+
+if (process.env.NODE_ENV === "production") {
+  app.set("trust proxy", 1);
+}
+
+const MemoryStore = (createMemoryStore as any)(session);
+
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || "ninja-slideshow-dev-secret",
+    resave: false,
+    saveUninitialized: false,
+    store: new MemoryStore({ checkPeriod: 86400000 }),
+    cookie: {
+      secure: process.env.NODE_ENV === "production",
+      httpOnly: true,
+      maxAge: 24 * 60 * 60 * 1000,
+      sameSite: "lax",
+    },
+  }),
+);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
@@ -56,8 +80,7 @@ app.use((req, res, next) => {
     serveStatic(app);
   }
 
-  // Use environment variable PORT or fallback to 5000
-  const PORT = process.env.PORT || 5000;
+  const PORT = parseInt(process.env.PORT || "5000", 10);
   server.listen(PORT, "0.0.0.0", () => {
     log(`serving on port ${PORT}`);
   });

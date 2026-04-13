@@ -1,0 +1,15 @@
+{
+  "id": "com.ninja.slideshow",
+  "version": "1.0.0",
+  "vendor": "Ninja",
+  "type": "web",
+  "main": "index.html",
+  "title": "NINJA Slideshow",
+  "icon": "icon.png",
+  "largeIcon": "largeIcon.png",
+  "bgColor": "#000000",
+  "resolution": "1920x1080",
+  "transparent": false,
+  "disableBackHistoryAPI": true,
+  "handlesRelaunch": true
+}

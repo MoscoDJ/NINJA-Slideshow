@@ -1,296 +1,431 @@
-// server/routes.ts
-import type { Express } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { Server as SocketServer } from "socket.io";
-import multer from "multer";
-import aws from "aws-sdk";
+import {
+  S3Client,
+  ListBucketsCommand,
+  ListObjectsCommand,
+  GetObjectCommand,
+  PutObjectCommand,
+  DeleteObjectCommand,
+  HeadObjectCommand,
+  CreateMultipartUploadCommand,
+  UploadPartCommand,
+  CompleteMultipartUploadCommand,
+  AbortMultipartUploadCommand,
+  PutObjectAclCommand,
+} from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import path from "path";
-import cors from 'cors';
+import crypto from "crypto";
+import cors from "cors";
 
-const BUCKET_NAME = process.env.BUCKET_NAME || 'ninjacdn';
-const FOLDER_NAME = 'slideshow';
-
-// Verificar y configurar las credenciales
-if (!process.env.SPACES_KEY || !process.env.SPACES_SECRET_KEY) {
-  console.error('ERROR: Faltan las credenciales de Digital Ocean Spaces');
-  console.error('Credenciales requeridas:');
-  console.error('- SPACES_KEY:', process.env.SPACES_KEY ? '✓' : '✗');
-  console.error('- SPACES_SECRET_KEY:', process.env.SPACES_SECRET_KEY ? '✓' : '✗');
-  throw new Error('Faltan las credenciales de Digital Ocean Spaces');
+declare module "express-session" {
+  interface SessionData {
+    isAdmin: boolean;
+  }
 }
 
-// Configurar endpoint y región
-const spacesEndpoint = new aws.Endpoint('sfo3.digitaloceanspaces.com');
-const region = 'sfo3';
-
-// Configuración de AWS SDK con debugging
-const s3 = new aws.S3({
-  endpoint: spacesEndpoint,
-  accessKeyId: process.env.SPACES_KEY,
-  secretAccessKey: process.env.SPACES_SECRET_KEY,
-  region: region,
-  signatureVersion: 'v4',
-  s3ForcePathStyle: true,
-  computeChecksums: true,
-  logger: console,
-  httpOptions: {
-    timeout: 10000,
-    agent: false
+function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  if (req.session?.isAdmin) {
+    return next();
   }
-});
+  res.status(401).json({ error: "No autorizado" });
+}
 
-// Log de configuración (sin exponer credenciales)
-console.log('Configuración de S3:', {
-  endpoint: spacesEndpoint.href,
-  region: region,
-  hasAccessKeyId: !!process.env.SPACES_KEY,
-  hasSecretAccessKey: !!process.env.SPACES_SECRET_KEY
-});
+const BUCKET_NAME = process.env.BUCKET_NAME || "ninjacdn";
+const FOLDER_NAME = "slideshow";
+const SPACES_REGION = "sfo3";
+const SPACES_HOST = `${SPACES_REGION}.digitaloceanspaces.com`;
 
-// Configuración de tipos MIME permitidos
-const allowedMimeTypes = [
-  'image/jpeg',
-  'image/png',
-  'image/gif',
-  'image/webp',
-  'video/mp4',
-  'video/webm'
-];
+if (!process.env.SPACES_KEY || !process.env.SPACES_SECRET_KEY) {
+  console.error("ERROR: Missing Digital Ocean Spaces credentials");
+  throw new Error("Missing Digital Ocean Spaces credentials");
+}
 
-// Multer config
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 100 * 1024 * 1024 // 100MB limit
+const s3 = new S3Client({
+  endpoint: `https://${SPACES_HOST}`,
+  region: SPACES_REGION,
+  credentials: {
+    accessKeyId: process.env.SPACES_KEY,
+    secretAccessKey: process.env.SPACES_SECRET_KEY,
   },
-  fileFilter: (req, file, cb) => {
-    if (allowedMimeTypes.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error(`Tipo de archivo no permitido. Tipos permitidos: ${allowedMimeTypes.join(', ')}`));
-    }
-  }
+  forcePathStyle: true,
 });
+
+console.log("S3 configuration:", {
+  endpoint: `https://${SPACES_HOST}`,
+  region: SPACES_REGION,
+  bucket: BUCKET_NAME,
+});
+
+const ALLOWED_MIME_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "video/mp4",
+  "video/webm",
+];
 
 export function registerRoutes(app: Express): Server {
   const httpServer = createServer(app);
-  
-  // Configuración de CORS
+
   const corsOptions = {
     origin: "*",
     methods: ["GET", "POST", "DELETE"],
-    allowedHeaders: ["Content-Type"]
+    allowedHeaders: ["Content-Type"],
   };
 
-  // Aplicar CORS usando el middleware
   app.use(cors(corsOptions));
 
-  const io = new SocketServer(httpServer, {
-    cors: corsOptions
+  const io = new SocketServer(httpServer, { cors: corsOptions });
+
+  io.on("connection", (socket) => {
+    console.log("Client connected");
+    socket.on("disconnect", () => console.log("Client disconnected"));
   });
 
-  // Socket.IO connection handling
-  io.on('connection', (socket) => {
-    console.log('Client connected');
-    socket.on('disconnect', () => console.log('Client disconnected'));
+  // --- Auth ---
+
+  app.post("/api/login", (req, res) => {
+    const { password } = req.body;
+    const adminPassword = process.env.ADMIN_PASSWORD;
+
+    if (!adminPassword) {
+      console.error("ADMIN_PASSWORD environment variable is not set");
+      return res
+        .status(500)
+        .json({ error: "Configuración de autenticación incompleta" });
+    }
+
+    if (password === adminPassword) {
+      req.session.isAdmin = true;
+      return res.json({ message: "Login exitoso" });
+    }
+
+    res.status(401).json({ error: "Contraseña incorrecta" });
   });
 
-  // Get files list with order
-  app.get('/api/files', async (req, res) => {
+  app.post("/api/logout", (req, res) => {
+    req.session.destroy((err) => {
+      if (err)
+        return res
+          .status(500)
+          .json({ error: "Error al cerrar sesión" });
+      res.clearCookie("connect.sid");
+      res.json({ message: "Sesión cerrada" });
+    });
+  });
+
+  app.get("/api/auth/status", (req, res) => {
+    res.json({ authenticated: !!req.session?.isAdmin });
+  });
+
+  // --- Files listing ---
+
+  app.get("/api/files", async (req, res) => {
     try {
-      // Verificar configuración
-      if (!process.env.SPACES_KEY || !process.env.SPACES_SECRET_KEY || !BUCKET_NAME) {
-        console.error('Error: Faltan variables de entorno necesarias');
-        return res.status(500).json({ 
-          error: 'Configuración incompleta',
-          details: {
-            SPACES_KEY: !!process.env.SPACES_KEY,
-            SPACES_SECRET_KEY: !!process.env.SPACES_SECRET_KEY,
-            BUCKET_NAME: !!BUCKET_NAME
-          }
-        });
+      const bucketsResp = await s3.send(new ListBucketsCommand({}));
+      if (!bucketsResp.Buckets?.some((b) => b.Name === BUCKET_NAME)) {
+        return res.status(404).json({ error: "Bucket not found" });
       }
 
-      // Verificar que el bucket existe
-      try {
-        const listBucketsData = await s3.listBuckets().promise();
-        const bucketExists = listBucketsData.Buckets?.some(bucket => bucket.Name === BUCKET_NAME);
-        
-        if (!bucketExists) {
-          console.error(`Bucket '${BUCKET_NAME}' no encontrado`);
-          return res.status(404).json({ error: 'Bucket not found' });
-        }
-      } catch (bucketError: any) {
-        console.error('Error al verificar el bucket:', bucketError);
-        return res.status(500).json({ 
-          error: 'Error de autenticación',
-          details: bucketError.code
-        });
-      }
-
-      const params = {
-        Bucket: BUCKET_NAME!,
-        Prefix: FOLDER_NAME + '/'
-      };
-      
-      // Obtener la lista de archivos
-      const data = await s3.listObjects(params).promise();
-      let files = data.Contents
-        ?.filter(item => {
-          return item?.Size > 0 && 
-                 item.Key !== `${FOLDER_NAME}/` && 
-                 !item.Key?.endsWith('order.json');
-        })
-        .map(item => ({
-          name: path.basename(item.Key as string),
-          url: `https://${BUCKET_NAME}.${spacesEndpoint.hostname}/${item.Key}`,
-          type: path.extname(item.Key as string).toLowerCase()
-        })) || [];
-
-      // Intentar obtener el orden guardado
-      try {
-        const orderData = await s3.getObject({
+      const data = await s3.send(
+        new ListObjectsCommand({
           Bucket: BUCKET_NAME,
-          Key: `${FOLDER_NAME}/order.json`
-        }).promise();
+          Prefix: FOLDER_NAME + "/",
+        }),
+      );
 
-        if (orderData.Body) {
-          const savedOrder = JSON.parse(orderData.Body.toString()).order;
-          // Ordenar los archivos según el orden guardado
+      let files =
+        data.Contents?.filter(
+          (item) =>
+            item.Size &&
+            item.Size > 0 &&
+            item.Key !== `${FOLDER_NAME}/` &&
+            !item.Key?.endsWith("order.json"),
+        ).map((item) => {
+          const ts = item.LastModified
+            ? Math.floor(item.LastModified.getTime() / 1000)
+            : 0;
+          return {
+            name: path.basename(item.Key!),
+            url: `https://${BUCKET_NAME}.${SPACES_HOST}/${item.Key}?v=${ts}`,
+            type: path.extname(item.Key!).toLowerCase(),
+            lastModified: item.LastModified?.toISOString(),
+          };
+        }) || [];
+
+      try {
+        const orderResp = await s3.send(
+          new GetObjectCommand({
+            Bucket: BUCKET_NAME,
+            Key: `${FOLDER_NAME}/order.json`,
+          }),
+        );
+        const bodyStr = await orderResp.Body?.transformToString();
+        if (bodyStr) {
+          const savedOrder: string[] = JSON.parse(bodyStr).order;
           files.sort((a, b) => {
-            const aIndex = savedOrder.indexOf(a.name);
-            const bIndex = savedOrder.indexOf(b.name);
-            // Si un archivo no está en el orden guardado, ponerlo al final
-            if (aIndex === -1) return 1;
-            if (bIndex === -1) return -1;
-            return aIndex - bIndex;
+            const aIdx = savedOrder.indexOf(a.name);
+            const bIdx = savedOrder.indexOf(b.name);
+            if (aIdx === -1) return 1;
+            if (bIdx === -1) return -1;
+            return aIdx - bIdx;
           });
         }
-      } catch (orderError) {
-        console.log('No order file found, using default order');
+      } catch {
         files.sort((a, b) => a.name.localeCompare(b.name));
       }
-      
+
+      const body = JSON.stringify(files);
+      const etag = `"${crypto.createHash("md5").update(body).digest("hex")}"`;
+
+      res.set("Cache-Control", "no-cache");
+      res.set("ETag", etag);
+
+      if (req.headers["if-none-match"] === etag) {
+        return res.status(304).end();
+      }
+
       res.json(files);
     } catch (error: any) {
-      console.error('Error al listar archivos:', error);
-      const errorMessage = error.code === 'CredentialsError' 
-        ? 'Error de autenticación con Digital Ocean Spaces'
-        : error.message;
-      res.status(500).json({ error: errorMessage });
+      console.error("Error listing files:", error);
+      res.status(500).json({ error: error.message });
     }
   });
 
-  // Upload file
-  app.post('/api/upload', upload.single('file'), async (req, res) => {
+  // --- Presigned upload (simple, < 100 MB) ---
+
+  app.post("/api/upload/presign", requireAdmin, async (req, res) => {
     try {
-      if (!req.file) {
-        throw new Error('No se ha subido ningún archivo');
+      const { filename, contentType } = req.body;
+      if (!filename || !contentType) {
+        return res
+          .status(400)
+          .json({ error: "filename and contentType are required" });
+      }
+      if (!ALLOWED_MIME_TYPES.includes(contentType)) {
+        return res.status(400).json({
+          error: `Tipo no permitido. Permitidos: ${ALLOWED_MIME_TYPES.join(", ")}`,
+        });
       }
 
-      const params = {
+      const key = `${FOLDER_NAME}/${filename}`;
+      const command = new PutObjectCommand({
         Bucket: BUCKET_NAME,
-        Key: `${FOLDER_NAME}/${req.file.originalname}`,
-        Body: req.file.buffer,
-        ACL: 'public-read',
-        ContentType: req.file.mimetype
-      };
-      
-      await s3.upload(params).promise();
-      io.emit('filesUpdated');
-      res.json({ message: 'Archivo subido exitosamente' });
+        Key: key,
+        ContentType: contentType,
+      });
+
+      const url = await getSignedUrl(s3, command, { expiresIn: 3600 });
+      res.json({ url, key });
     } catch (error: any) {
-      const errorMessage = error.message || 'Error al subir el archivo';
-      res.status(500).json({ error: errorMessage });
+      console.error("Error generating presigned URL:", error);
+      res.status(500).json({ error: error.message });
     }
   });
 
-  // Delete file
-  app.delete('/api/files/:filename', async (req, res) => {
+  // Confirm upload — sets ACL to public-read and notifies clients
+  app.post("/api/upload/confirm", requireAdmin, async (req, res) => {
     try {
-      // Verificar que el archivo existe antes de intentar eliminarlo
-      const checkParams = {
+      const { key } = req.body;
+      if (key) {
+        await s3.send(
+          new PutObjectAclCommand({
+            Bucket: BUCKET_NAME,
+            Key: key,
+            ACL: "public-read",
+          }),
+        );
+      }
+      io.emit("filesUpdated");
+      res.json({ message: "Upload confirmed" });
+    } catch (error: any) {
+      console.error("Error confirming upload:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- Multipart upload (>= 100 MB) ---
+
+  app.post("/api/upload/init-multipart", requireAdmin, async (req, res) => {
+    try {
+      const { filename, contentType } = req.body;
+      if (!filename || !contentType) {
+        return res
+          .status(400)
+          .json({ error: "filename and contentType are required" });
+      }
+      if (!ALLOWED_MIME_TYPES.includes(contentType)) {
+        return res.status(400).json({
+          error: `Tipo no permitido. Permitidos: ${ALLOWED_MIME_TYPES.join(", ")}`,
+        });
+      }
+
+      const key = `${FOLDER_NAME}/${filename}`;
+      const resp = await s3.send(
+        new CreateMultipartUploadCommand({
+          Bucket: BUCKET_NAME,
+          Key: key,
+          ContentType: contentType,
+          ACL: "public-read",
+        }),
+      );
+
+      res.json({ uploadId: resp.UploadId, key });
+    } catch (error: any) {
+      console.error("Error initiating multipart upload:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/upload/presign-part", requireAdmin, async (req, res) => {
+    try {
+      const { key, uploadId, partNumber } = req.body;
+      if (!key || !uploadId || !partNumber) {
+        return res
+          .status(400)
+          .json({ error: "key, uploadId, and partNumber are required" });
+      }
+
+      const command = new UploadPartCommand({
         Bucket: BUCKET_NAME,
-        Key: `${FOLDER_NAME}/${req.params.filename}`
-      };
+        Key: key,
+        UploadId: uploadId,
+        PartNumber: partNumber,
+      });
+
+      const url = await getSignedUrl(s3, command, { expiresIn: 3600 });
+      res.json({ url });
+    } catch (error: any) {
+      console.error("Error generating part presigned URL:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/upload/complete", requireAdmin, async (req, res) => {
+    try {
+      const { key, uploadId, parts } = req.body;
+      if (!key || !uploadId || !Array.isArray(parts)) {
+        return res
+          .status(400)
+          .json({ error: "key, uploadId, and parts are required" });
+      }
+
+      await s3.send(
+        new CompleteMultipartUploadCommand({
+          Bucket: BUCKET_NAME,
+          Key: key,
+          UploadId: uploadId,
+          MultipartUpload: {
+            Parts: parts.map(
+              (p: { partNumber: number; etag: string }) => ({
+                PartNumber: p.partNumber,
+                ETag: p.etag,
+              }),
+            ),
+          },
+        }),
+      );
+
+      io.emit("filesUpdated");
+      res.json({ message: "Upload completed" });
+    } catch (error: any) {
+      console.error("Error completing multipart upload:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/upload/abort", requireAdmin, async (req, res) => {
+    try {
+      const { key, uploadId } = req.body;
+      if (!key || !uploadId) {
+        return res
+          .status(400)
+          .json({ error: "key and uploadId are required" });
+      }
+
+      await s3.send(
+        new AbortMultipartUploadCommand({
+          Bucket: BUCKET_NAME,
+          Key: key,
+          UploadId: uploadId,
+        }),
+      );
+
+      res.json({ message: "Upload aborted" });
+    } catch (error: any) {
+      console.error("Error aborting multipart upload:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- Delete file ---
+
+  app.delete("/api/files/:filename", requireAdmin, async (req, res) => {
+    try {
+      const key = `${FOLDER_NAME}/${req.params.filename}`;
 
       try {
-        await s3.headObject(checkParams).promise();
-      } catch (error) {
-        return res.status(404).json({ error: 'Archivo no encontrado' });
+        await s3.send(
+          new HeadObjectCommand({ Bucket: BUCKET_NAME, Key: key }),
+        );
+      } catch {
+        return res.status(404).json({ error: "Archivo no encontrado" });
       }
 
-      const deleteParams = {
-        Bucket: BUCKET_NAME,
-        Key: `${FOLDER_NAME}/${req.params.filename}`
-      };
-      
-      await s3.deleteObject(deleteParams).promise();
-      io.emit('filesUpdated');
-      res.json({ message: 'Archivo eliminado exitosamente' });
+      await s3.send(
+        new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: key }),
+      );
+      io.emit("filesUpdated");
+      res.json({ message: "Archivo eliminado exitosamente" });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
   });
 
-  // Update order
-  app.post('/api/order', async (req, res) => {
+  // --- Update order ---
+
+  app.post("/api/order", requireAdmin, async (req, res) => {
     try {
       const { order } = req.body;
       if (!Array.isArray(order)) {
-        throw new Error('Formato de orden inválido');
+        throw new Error("Formato de orden inválido");
       }
 
-      // Verificar que todos los archivos existen
-      const listParams = {
-        Bucket: BUCKET_NAME,
-        Prefix: FOLDER_NAME + '/'
-      };
-      
-      const existingFiles = await s3.listObjects(listParams).promise();
-      const existingFileNames = existingFiles.Contents?.map(item => 
-        path.basename(item.Key as string)
-      ) || [];
+      const listing = await s3.send(
+        new ListObjectsCommand({
+          Bucket: BUCKET_NAME,
+          Prefix: FOLDER_NAME + "/",
+        }),
+      );
+      const existingNames =
+        listing.Contents?.map((item) => path.basename(item.Key!)) || [];
+      if (!order.every((f: string) => existingNames.includes(f))) {
+        throw new Error("Algunos archivos en el orden no existen");
+      }
 
-      const allFilesExist = order.every(filename => 
-        existingFileNames.includes(filename)
+      await s3.send(
+        new PutObjectCommand({
+          Bucket: BUCKET_NAME,
+          Key: `${FOLDER_NAME}/order.json`,
+          Body: JSON.stringify(
+            { order, updatedAt: new Date().toISOString() },
+            null,
+            2,
+          ),
+          ContentType: "application/json",
+          ACL: "public-read",
+        }),
       );
 
-      if (!allFilesExist) {
-        throw new Error('Algunos archivos en el orden no existen');
-      }
-
-      console.log('Recibido nuevo orden:', order);
-
-      // Guardar el orden en un archivo JSON en el Space
-      const orderData = JSON.stringify({ 
-        order, 
-        updatedAt: new Date().toISOString() 
-      }, null, 2);
-
-      const putObjectParams = {
-        Bucket: BUCKET_NAME,
-        Key: `${FOLDER_NAME}/order.json`,
-        Body: orderData,
-        ContentType: 'application/json',
-        ACL: 'public-read'
-      };
-
-      console.log('Guardando orden en S3...');
-      await s3.putObject(putObjectParams).promise();
-      console.log('Orden guardado exitosamente');
-
-      io.emit('filesUpdated');
-      res.json({ 
-        message: 'Orden actualizado exitosamente',
-        order 
-      });
+      io.emit("filesUpdated");
+      res.json({ message: "Orden actualizado exitosamente", order });
     } catch (error: any) {
-      console.error('Error al actualizar el orden:', error);
-      res.status(500).json({ 
-        error: error.message,
-        details: error.stack 
-      });
+      console.error("Error updating order:", error);
+      res.status(500).json({ error: error.message });
     }
   });
 
