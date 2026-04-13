@@ -108,6 +108,7 @@ async function configureBucketCors() {
               AllowedOrigins: ["*"],
               AllowedMethods: ["GET", "PUT", "HEAD"],
               AllowedHeaders: ["*"],
+              ExposeHeaders: ["ETag"],
               MaxAgeSeconds: 3600,
             },
           ],
