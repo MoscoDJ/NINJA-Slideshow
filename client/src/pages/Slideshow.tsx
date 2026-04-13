@@ -10,33 +10,34 @@ interface SlideFile {
 
 const IMAGE_DURATION = 15_000;
 const FADE_DURATION = 1_000;
-// Force a full page reload every N complete loops to reclaim leaked memory.
-// Critical for Smart TV browsers (webOS, Tizen) with limited heap.
 const LOOPS_BEFORE_RELOAD = 5;
 
 function isVideo(type: string) {
   return type === ".mp4" || type === ".webm";
 }
 
-/** Explicitly release a video element's media buffers. */
 function releaseVideo(video: HTMLVideoElement | null) {
   if (!video) return;
   video.onended = null;
   video.onloadeddata = null;
   video.onerror = null;
+  video.ontimeupdate = null;
   video.pause();
   video.removeAttribute("src");
-  video.load(); // forces the browser to release the media resource
+  video.load();
 }
 
 export default function Slideshow() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [fadeOut, setFadeOut] = useState(false);
+  const [progress, setProgress] = useState(0);
   const loopCount = useRef(0);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const transitionRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const progressRaf = useRef<number | null>(null);
+  const slideStart = useRef(0);
 
   const { data: files = [], refetch } = useQuery<SlideFile[]>({
     queryKey: ["/api/files"],
@@ -47,13 +48,34 @@ export default function Slideshow() {
     return () => { socket.off("filesUpdated"); };
   }, [refetch]);
 
+  const stopProgressBar = useCallback(() => {
+    if (progressRaf.current) {
+      cancelAnimationFrame(progressRaf.current);
+      progressRaf.current = null;
+    }
+  }, []);
+
+  const startImageProgressBar = useCallback(() => {
+    slideStart.current = performance.now();
+    setProgress(0);
+
+    const tick = () => {
+      const elapsed = performance.now() - slideStart.current;
+      const pct = Math.min((elapsed / IMAGE_DURATION) * 100, 100);
+      setProgress(pct);
+      if (pct < 100) {
+        progressRaf.current = requestAnimationFrame(tick);
+      }
+    };
+    progressRaf.current = requestAnimationFrame(tick);
+  }, []);
+
   const goToNextSlide = useCallback(() => {
-    // Clear any pending timers so we don't double-advance
     if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
+    stopProgressBar();
 
     setFadeOut(true);
     transitionRef.current = setTimeout(() => {
-      // Release the outgoing video BEFORE React unmounts it
       releaseVideo(videoRef.current);
       videoRef.current = null;
 
@@ -62,7 +84,6 @@ export default function Slideshow() {
         if (next === 0) {
           loopCount.current++;
           if (loopCount.current >= LOOPS_BEFORE_RELOAD) {
-            // Full reload reclaims all leaked browser memory
             window.location.reload();
           }
         }
@@ -71,33 +92,45 @@ export default function Slideshow() {
 
       setFadeOut(false);
       setIsLoading(true);
+      setProgress(0);
     }, FADE_DURATION);
-  }, [files.length]);
+  }, [files.length, stopProgressBar]);
 
   // Slide timer / video-ended handler
   useEffect(() => {
-    if (!files.length) return;
+    if (!files.length || isLoading) return;
     const file = files[currentIndex];
 
     if (isVideo(file.type)) {
       const vid = videoRef.current;
       if (vid) {
         vid.onended = goToNextSlide;
+        vid.ontimeupdate = () => {
+          if (vid.duration && isFinite(vid.duration)) {
+            setProgress((vid.currentTime / vid.duration) * 100);
+          }
+        };
+        vid.onerror = () => goToNextSlide();
       }
     } else {
+      startImageProgressBar();
       timerRef.current = setTimeout(goToNextSlide, IMAGE_DURATION);
     }
 
     return () => {
       if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
       if (transitionRef.current) { clearTimeout(transitionRef.current); transitionRef.current = null; }
+      stopProgressBar();
     };
-  }, [currentIndex, files.length, goToNextSlide]);
+  }, [currentIndex, files.length, isLoading, goToNextSlide, startImageProgressBar, stopProgressBar]);
 
   // Cleanup on unmount
   useEffect(() => {
-    return () => { releaseVideo(videoRef.current); };
-  }, []);
+    return () => {
+      releaseVideo(videoRef.current);
+      stopProgressBar();
+    };
+  }, [stopProgressBar]);
 
   if (files.length === 0) {
     return (
@@ -112,16 +145,28 @@ export default function Slideshow() {
 
   return (
     <div className="w-screen h-screen bg-black overflow-hidden relative">
+      {/* Progress bar */}
+      <div className="absolute top-0 left-0 right-0 z-50 h-[3px] bg-black/30">
+        <div
+          className="h-full bg-[#ec1c24]"
+          style={{
+            width: `${progress}%`,
+            transition: isVideo(currentFile.type)
+              ? "width 0.25s linear"
+              : "none",
+          }}
+        />
+      </div>
+
       {isLoading && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="w-16 h-16 border-4 border-red-500 border-t-transparent rounded-full animate-spin" />
+        <div className="absolute inset-0 flex items-center justify-center z-40">
+          <div className="w-16 h-16 border-4 border-[#ec1c24] border-t-transparent rounded-full animate-spin" />
         </div>
       )}
 
       {isVideo(currentFile.type) ? (
         <video
           ref={(el) => {
-            // Release the previous element if React reuses the node
             if (videoRef.current && videoRef.current !== el) {
               releaseVideo(videoRef.current);
             }
@@ -133,7 +178,10 @@ export default function Slideshow() {
           autoPlay
           muted
           playsInline
+          crossOrigin="anonymous"
+          preload="auto"
           onLoadedData={() => setIsLoading(false)}
+          onError={() => goToNextSlide()}
         />
       ) : (
         <img
@@ -141,7 +189,9 @@ export default function Slideshow() {
           src={currentFile.url}
           alt={currentFile.name}
           className={`w-full h-full object-contain transition-opacity duration-1000 ${opacityClass}`}
+          crossOrigin="anonymous"
           onLoad={() => setIsLoading(false)}
+          onError={() => goToNextSlide()}
         />
       )}
     </div>
