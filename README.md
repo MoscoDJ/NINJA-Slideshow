@@ -96,6 +96,7 @@ Abre http://localhost:5000 para el slideshow y http://localhost:5000/admin para 
 | `SPACES_SECRET_KEY` | Si | Secret key de DO Spaces |
 | `BUCKET_NAME` | No | Nombre del bucket (default: `ninjacdn`) |
 | `ADMIN_PASSWORD` | Si | Password para acceder a `/admin` |
+| `ADMIN2_PASSWORD` | No | Password alternativo para un segundo admin |
 | `SESSION_SECRET` | Si | Secreto para firmar cookies de sesion |
 | `PORT` | No | Puerto del servidor (default: `5000`) |
 | `NODE_ENV` | No | `production` en deploy |
@@ -132,7 +133,8 @@ y apuntar el DNS (CNAME) al dominio que DO asigne.
 
 ## Autenticacion
 
-El admin esta protegido por password. Se configura con la variable `ADMIN_PASSWORD` en DO App Platform.
+El admin esta protegido por password. Se configura con `ADMIN_PASSWORD` en DO App Platform.
+Opcionalmente, `ADMIN2_PASSWORD` permite un segundo acceso con contraseña distinta.
 
 - `GET /api/files` es publico (lo necesitan el slideshow, Flutter y las TVs)
 - Socket.IO (`filesUpdated`) es publico
