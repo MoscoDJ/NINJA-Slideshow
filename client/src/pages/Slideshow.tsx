@@ -16,19 +16,9 @@ function isVideo(type: string) {
   return type === ".mp4" || type === ".webm";
 }
 
-function releaseVideo(video: HTMLVideoElement | null) {
-  if (!video) return;
-  video.onended = null;
-  video.onloadeddata = null;
-  video.onerror = null;
-  video.ontimeupdate = null;
-  video.pause();
-  video.removeAttribute("src");
-  video.load();
-}
-
 export default function Slideshow() {
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [slideKey, setSlideKey] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [fadeOut, setFadeOut] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -77,8 +67,14 @@ export default function Slideshow() {
     setFadeOut(true);
 
     transitionRef.current = setTimeout(() => {
-      releaseVideo(videoRef.current);
-      videoRef.current = null;
+      // Pause current video but DON'T remove src (React manages it)
+      const vid = videoRef.current;
+      if (vid) {
+        vid.onended = null;
+        vid.onerror = null;
+        vid.ontimeupdate = null;
+        vid.pause();
+      }
 
       setCurrentIndex((prev) => {
         const next = (prev + 1) % files.length;
@@ -90,7 +86,8 @@ export default function Slideshow() {
         }
         return next;
       });
-
+      // Unique key forces React to create a fresh DOM element every time
+      setSlideKey((k) => k + 1);
       setFadeOut(false);
       setIsLoading(true);
       setProgress(0);
@@ -98,8 +95,7 @@ export default function Slideshow() {
     }, FADE_DURATION);
   }, [files.length, stopProgressBar]);
 
-  // Attach video event handlers via DOM (not React synthetic events)
-  // to avoid issues with releaseVideo triggering React's onError
+  // Attach video handlers via DOM properties (not React synthetic events)
   useEffect(() => {
     if (!files.length || isLoading) return;
     const file = files[currentIndex];
@@ -125,13 +121,10 @@ export default function Slideshow() {
       if (transitionRef.current) { clearTimeout(transitionRef.current); transitionRef.current = null; }
       stopProgressBar();
     };
-  }, [currentIndex, files.length, isLoading, goToNextSlide, startImageProgressBar, stopProgressBar]);
+  }, [currentIndex, slideKey, files.length, isLoading, goToNextSlide, startImageProgressBar, stopProgressBar]);
 
   useEffect(() => {
-    return () => {
-      releaseVideo(videoRef.current);
-      stopProgressBar();
-    };
+    return () => stopProgressBar();
   }, [stopProgressBar]);
 
   if (files.length === 0) {
@@ -155,9 +148,7 @@ export default function Slideshow() {
           className="h-full bg-[#ec1c24]"
           style={{
             width: `${progress}%`,
-            transition: isVideo(currentFile.type)
-              ? "width 0.25s linear"
-              : "none",
+            transition: isVideo(currentFile.type) ? "width 0.25s linear" : "none",
           }}
         />
       </div>
@@ -171,12 +162,11 @@ export default function Slideshow() {
       {isVideo(currentFile.type) ? (
         <video
           ref={(el) => {
-            if (videoRef.current && videoRef.current !== el) {
-              releaseVideo(videoRef.current);
-            }
             videoRef.current = el;
+            // React bug #6544: muted must be set via DOM property
+            if (el) el.muted = true;
           }}
-          key={currentFile.url}
+          key={slideKey}
           src={currentFile.url}
           className={`w-full h-full object-contain transition-opacity duration-1000 ${opacityClass}`}
           autoPlay
@@ -187,7 +177,7 @@ export default function Slideshow() {
         />
       ) : (
         <img
-          key={currentFile.url}
+          key={slideKey}
           src={currentFile.url}
           alt={currentFile.name}
           className={`w-full h-full object-contain transition-opacity duration-1000 ${opacityClass}`}
