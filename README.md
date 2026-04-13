@@ -28,7 +28,7 @@ Browser / Flutter / TV App
 | Frontend web | React + Vite + Tailwind/shadcn |
 | Storage | Digital Ocean Spaces (S3-compatible) |
 | Uploads | Presigned URLs + multipart (AWS SDK v3) |
-| Auth | Password via ENV + express-session |
+| Auth | Password via ENV + signed cookie (stateless, multi-instance) |
 | Cliente Pi | Flutter Linux desktop |
 | Cliente Android TV | Flutter APK |
 | Cliente LG | webOS web app (vanilla JS) |
@@ -40,8 +40,8 @@ Browser / Flutter / TV App
 
 ```
 ├── server/                  # Backend Express
-│   ├── index.ts             # Entry point, session middleware
-│   ├── routes.ts            # API, S3, Socket.IO, CORS auto-config
+│   ├── index.ts             # Entry point, Express setup
+│   ├── routes.ts            # API, S3, Socket.IO, CORS, auth (signed cookies)
 │   └── vite.ts              # Dev/prod asset serving
 ├── client/                  # Frontend React
 │   ├── public/
@@ -96,7 +96,7 @@ Abre http://localhost:5000 para el slideshow y http://localhost:5000/admin para 
 | `BUCKET_NAME` | No | Nombre del bucket (default: `ninjacdn`) |
 | `ADMIN_PASSWORD` | Si | Password para acceder a `/admin` |
 | `ADMIN2_PASSWORD` | No | Password alternativo para un segundo admin |
-| `SESSION_SECRET` | Si | Secreto para firmar cookies de sesion |
+| `SESSION_SECRET` | Si | Secreto para firmar el token de autenticacion (HMAC-SHA256) |
 | `PORT` | No | Puerto del servidor (default: `5000`) |
 | `NODE_ENV` | No | `production` en deploy |
 
@@ -132,12 +132,15 @@ y apuntar el DNS (CNAME) al dominio que DO asigne.
 
 ## Autenticacion
 
-El admin esta protegido por password. Se configura con `ADMIN_PASSWORD`
-en DO App Platform. Opcionalmente, `ADMIN2_PASSWORD` permite un segundo
-acceso con contraseña distinta. Ambas otorgan los mismos permisos.
+El admin usa autenticacion stateless basada en cookies firmadas (HMAC-SHA256).
+No depende de sesiones server-side, asi que funciona correctamente con
+multiples instancias de DO App Platform y sobrevive restarts/deploys.
 
+- Login valida password → genera token firmado con `SESSION_SECRET` → cookie `ninja_auth`
+- Cada request protegido verifica la firma del token (cualquier instancia puede hacerlo)
+- `ADMIN_PASSWORD` y opcionalmente `ADMIN2_PASSWORD` permiten dos accesos con distintas contraseñas
 - `GET /api/files` y Socket.IO son publicos (los necesitan el slideshow, Flutter y las TVs)
-- Todo lo demas (`upload`, `delete`, `order`) requiere sesion autenticada
+- Todo lo demas (`upload`, `delete`, `order`) requiere token valido
 
 ---
 
