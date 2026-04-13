@@ -5,8 +5,6 @@ Sube imagenes y videos a Digital Ocean Spaces, ordenalos con drag & drop
 desde el panel de admin, y reproducelos en bucle infinito en cualquier
 pantalla: browser, Raspberry Pi, Android TV, LG o Samsung.
 
-**Produccion:** `https://your-domain.com`
-
 ---
 
 ## Arquitectura
@@ -15,7 +13,7 @@ pantalla: browser, Raspberry Pi, Android TV, LG o Samsung.
 Browser / Flutter / TV App
         │
         ├── GET  /api/files          (lista ordenada de archivos)
-        ├── WS   filesUpdated        (Socket.IO, actualizacion en tiempo real)
+        ├── WS   filesUpdated        (Socket.IO, tiempo real)
         └── PUT  presigned URL       (upload directo a DO Spaces)
         │
    ┌────▼─────┐      ┌──────────────┐
@@ -31,7 +29,6 @@ Browser / Flutter / TV App
 | Storage | Digital Ocean Spaces (S3-compatible) |
 | Uploads | Presigned URLs + multipart (AWS SDK v3) |
 | Auth | Password via ENV + express-session |
-| DB | PostgreSQL/Drizzle (scaffold, no activo) |
 | Cliente Pi | Flutter Linux desktop |
 | Cliente Android TV | Flutter APK |
 | Cliente LG | webOS web app (vanilla JS) |
@@ -43,15 +40,17 @@ Browser / Flutter / TV App
 
 ```
 ├── server/                  # Backend Express
-│   ├── index.ts             # App entry, session middleware
-│   ├── routes.ts            # API routes, S3 client, Socket.IO
+│   ├── index.ts             # Entry point, session middleware
+│   ├── routes.ts            # API, S3, Socket.IO, CORS auto-config
 │   └── vite.ts              # Dev/prod asset serving
 ├── client/                  # Frontend React
+│   ├── public/
+│   │   └── logo.png         # Logo NINJA (reemplazar con el real)
 │   └── src/
 │       ├── pages/
 │       │   ├── Slideshow.tsx # Visor fullscreen con memory management
 │       │   ├── Admin.tsx     # Panel admin (auth + upload + drag & drop)
-│       │   └── Login.tsx     # Login page
+│       │   └── Login.tsx     # Pantalla de login
 │       └── lib/
 │           ├── socket.ts     # Socket.IO client
 │           └── queryClient.ts
@@ -68,8 +67,8 @@ Browser / Flutter / TV App
 
 | Ruta | Descripcion |
 |---|---|
-| `https://your-domain.com/` | Slideshow (publico, fullscreen) |
-| `https://your-domain.com/admin` | Panel de administracion (requiere password) |
+| `/` | Slideshow publico, fullscreen |
+| `/admin` | Panel de administracion (requiere password) |
 
 ---
 
@@ -110,8 +109,9 @@ Abre http://localhost:5000 para el slideshow y http://localhost:5000/admin para 
 1. Crear un Space en DO (region `sfo3`)
 2. Generar credenciales en API > Spaces Keys
 
-> CORS del bucket se configura automaticamente al iniciar el servidor.
-> No es necesario configurarlo manualmente en el panel de DO.
+> CORS del bucket se configura automaticamente al iniciar el servidor
+> via `PutBucketCorsCommand`. No es necesario configurarlo manualmente
+> en el panel de DO.
 
 ### 2. App Platform
 
@@ -132,11 +132,11 @@ y apuntar el DNS (CNAME) al dominio que DO asigne.
 
 ## Autenticacion
 
-El admin esta protegido por password. Se configura con `ADMIN_PASSWORD` en DO App Platform.
-Opcionalmente, `ADMIN2_PASSWORD` permite un segundo acceso con contraseña distinta.
+El admin esta protegido por password. Se configura con `ADMIN_PASSWORD`
+en DO App Platform. Opcionalmente, `ADMIN2_PASSWORD` permite un segundo
+acceso con contraseña distinta. Ambas otorgan los mismos permisos.
 
-- `GET /api/files` es publico (lo necesitan el slideshow, Flutter y las TVs)
-- Socket.IO (`filesUpdated`) es publico
+- `GET /api/files` y Socket.IO son publicos (los necesitan el slideshow, Flutter y las TVs)
 - Todo lo demas (`upload`, `delete`, `order`) requiere sesion autenticada
 
 ---
@@ -154,13 +154,25 @@ El servidor nunca bufferea el archivo en memoria.
 
 ---
 
-## Cache
+## Cache y tiempo real
 
 - `/api/files` retorna `Cache-Control: no-cache` + `ETag` (304 si no hay cambios)
 - Las URLs de medios incluyen `?v={timestamp}` para cache-busting cuando un archivo se re-sube
 - Socket.IO emite `filesUpdated` despues de cada upload/delete/reorder
 - Los clientes (web, Flutter, TV apps) escuchan ese evento y refrescan la lista
-- El slideshow web hace auto-reload cada 5 loops completos para reclamar memoria
+- El slideshow web hace auto-reload cada 5 loops completos para reclamar memoria (3 en TVs)
+
+---
+
+## Branding
+
+El panel de admin y login usan los colores institucionales NINJA:
+
+- **Rojo NINJA:** `#ec1c24`
+- **Negro** y **blanco** como colores base
+
+El logo se carga desde `client/public/logo.png`. Para actualizarlo,
+reemplazar ese archivo y hacer deploy.
 
 ---
 
@@ -168,8 +180,7 @@ El servidor nunca bufferea el archivo en memoria.
 
 ### Browser (web)
 
-El slideshow web funciona en cualquier browser moderno. Accede a
-`https://your-domain.com/` para ver el slideshow fullscreen.
+El slideshow web funciona en cualquier browser moderno accediendo a la ruta `/`.
 
 Incluye manejo agresivo de memoria para funcionar en browsers limitados
 (Smart TVs): limpieza explicita de buffers de video y auto-reload periodico.
