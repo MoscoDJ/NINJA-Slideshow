@@ -70,7 +70,7 @@ ares-launch --device lgtv com.ninja.slideshow
 The server URL is hardcoded in `index.html` at the top of the script:
 
 ```javascript
-var SERVER_URL = "https://slideshow.ninja.com.mx";
+var SERVER_URL = "https://your-domain.com";
 ```
 
 Change it there before packaging if needed.

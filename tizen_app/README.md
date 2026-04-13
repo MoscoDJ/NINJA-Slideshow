@@ -43,7 +43,7 @@ tizen run -p ninjSlide.NINJASlideshow -t <device-serial>
 The server URL is set at the top of `index.html`:
 
 ```javascript
-var SERVER_URL = "https://slideshow.ninja.com.mx";
+var SERVER_URL = "https://your-domain.com";
 ```
 
 ## Icon

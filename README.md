@@ -5,7 +5,7 @@ Sube imagenes y videos a Digital Ocean Spaces, ordenalos con drag & drop
 desde el panel de admin, y reproducelos en bucle infinito en cualquier
 pantalla: browser, Raspberry Pi, Android TV, LG o Samsung.
 
-**Produccion:** https://slideshow.ninja.com.mx
+**Produccion:** `https://your-domain.com`
 
 ---
 
@@ -68,8 +68,8 @@ Browser / Flutter / TV App
 
 | Ruta | Descripcion |
 |---|---|
-| `https://slideshow.ninja.com.mx/` | Slideshow (publico, fullscreen) |
-| `https://slideshow.ninja.com.mx/admin` | Panel de administracion (requiere password) |
+| `https://your-domain.com/` | Slideshow (publico, fullscreen) |
+| `https://your-domain.com/admin` | Panel de administracion (requiere password) |
 
 ---
 
@@ -109,7 +109,7 @@ Abre http://localhost:5000 para el slideshow y http://localhost:5000/admin para 
 1. Crear un Space en DO (region `sfo3`)
 2. Generar credenciales en API > Spaces Keys
 3. Configurar CORS en el Space (Settings > CORS):
-   - **Allowed Origins:** `https://slideshow.ninja.com.mx`, `http://localhost:5000`
+   - **Allowed Origins:** `https://your-domain.com`, `http://localhost:5000`
    - **Allowed Methods:** `GET`, `PUT`
    - **Allowed Headers:** `Content-Type`
 
@@ -125,7 +125,7 @@ Abre http://localhost:5000 para el slideshow y http://localhost:5000/admin para 
 
 ### 3. Dominio custom
 
-Configurar `slideshow.ninja.com.mx` como custom domain en la App Platform
+Configurar tu dominio como custom domain en la App Platform
 y apuntar el DNS (CNAME) al dominio que DO asigne.
 
 ---
@@ -168,7 +168,7 @@ El servidor nunca bufferea el archivo en memoria.
 ### Browser (web)
 
 El slideshow web funciona en cualquier browser moderno. Accede a
-`https://slideshow.ninja.com.mx/` para ver el slideshow fullscreen.
+`https://your-domain.com/` para ver el slideshow fullscreen.
 
 Incluye manejo agresivo de memoria para funcionar en browsers limitados
 (Smart TVs): limpieza explicita de buffers de video y auto-reload periodico.

@@ -131,7 +131,7 @@ EOF
 ### 9. First run configuration
 
 On first launch, the app shows a configuration screen. Enter:
-- **Server URL**: `https://slideshow.ninja.com.mx`
+- **Server URL**: `https://your-domain.com`
 - **Image duration**: seconds per image (default: 15)
 
 Settings are persisted locally and survive reboots.

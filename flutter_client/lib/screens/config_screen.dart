@@ -105,7 +105,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
                     style: const TextStyle(fontSize: 18),
                     decoration: const InputDecoration(
                       labelText: 'Server URL',
-                      hintText: 'https://slideshow.ninja.com.mx',
+                      hintText: 'https://your-domain.com',
                       border: OutlineInputBorder(),
                       prefixIcon: Icon(Icons.link),
                       contentPadding:
