@@ -14,6 +14,7 @@ import {
   CompleteMultipartUploadCommand,
   AbortMultipartUploadCommand,
   PutObjectAclCommand,
+  PutBucketCorsCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import path from "path";
@@ -67,6 +68,31 @@ const ALLOWED_MIME_TYPES = [
   "video/mp4",
   "video/webm",
 ];
+
+async function configureBucketCors() {
+  try {
+    await s3.send(
+      new PutBucketCorsCommand({
+        Bucket: BUCKET_NAME,
+        CORSConfiguration: {
+          CORSRules: [
+            {
+              AllowedOrigins: ["*"],
+              AllowedMethods: ["GET", "PUT", "HEAD"],
+              AllowedHeaders: ["*"],
+              MaxAgeSeconds: 3600,
+            },
+          ],
+        },
+      }),
+    );
+    console.log("Bucket CORS configured successfully");
+  } catch (err: any) {
+    console.warn("Could not set bucket CORS (may require manual config):", err.message);
+  }
+}
+
+configureBucketCors();
 
 export function registerRoutes(app: Express): Server {
   const httpServer = createServer(app);

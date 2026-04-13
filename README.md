@@ -109,10 +109,9 @@ Abre http://localhost:5000 para el slideshow y http://localhost:5000/admin para 
 
 1. Crear un Space en DO (region `sfo3`)
 2. Generar credenciales en API > Spaces Keys
-3. Configurar CORS en el Space (Settings > CORS):
-   - **Allowed Origins:** `https://your-domain.com`, `http://localhost:5000`
-   - **Allowed Methods:** `GET`, `PUT`
-   - **Allowed Headers:** `Content-Type`
+
+> CORS del bucket se configura automaticamente al iniciar el servidor.
+> No es necesario configurarlo manualmente en el panel de DO.
 
 ### 2. App Platform
 
