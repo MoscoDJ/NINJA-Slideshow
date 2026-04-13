@@ -1,29 +1,9 @@
 import express, { type Request, Response, NextFunction } from "express";
-import session from "express-session";
-import createMemoryStore from "memorystore";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 
 const app = express();
-
 app.set("trust proxy", true);
-
-const MemoryStore = (createMemoryStore as any)(session);
-
-app.use(
-  session({
-    secret: process.env.SESSION_SECRET || "ninja-slideshow-dev-secret",
-    resave: true,
-    saveUninitialized: false,
-    store: new MemoryStore({ checkPeriod: 86400000 }),
-    cookie: {
-      httpOnly: true,
-      maxAge: 24 * 60 * 60 * 1000,
-      sameSite: "lax",
-    },
-  }),
-);
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
@@ -68,9 +48,6 @@ app.use((req, res, next) => {
     throw err;
   });
 
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
   if (app.get("env") === "development") {
     await setupVite(app, server);
   } else {

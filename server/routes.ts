@@ -21,14 +21,39 @@ import path from "path";
 import crypto from "crypto";
 import cors from "cors";
 
-declare module "express-session" {
-  interface SessionData {
-    isAdmin: boolean;
+const AUTH_SECRET = process.env.SESSION_SECRET || "ninja-slideshow-dev-secret";
+const AUTH_COOKIE = "ninja_auth";
+const AUTH_MAX_AGE = 24 * 60 * 60 * 1000;
+
+function signToken(payload: string): string {
+  const sig = crypto.createHmac("sha256", AUTH_SECRET).update(payload).digest("hex");
+  return payload + "." + sig;
+}
+
+function verifyToken(token: string): boolean {
+  const dot = token.lastIndexOf(".");
+  if (dot === -1) return false;
+  const payload = token.substring(0, dot);
+  const sig = token.substring(dot + 1);
+  const expected = crypto.createHmac("sha256", AUTH_SECRET).update(payload).digest("hex");
+  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return false;
+  const expiry = parseInt(payload.split(":")[1], 10);
+  return Date.now() < expiry;
+}
+
+function getCookie(req: Request, name: string): string | undefined {
+  const header = req.headers.cookie;
+  if (!header) return undefined;
+  for (const part of header.split(";")) {
+    const [k, ...v] = part.trim().split("=");
+    if (k === name) return decodeURIComponent(v.join("="));
   }
+  return undefined;
 }
 
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  if (req.session?.isAdmin) {
+  const token = getCookie(req, AUTH_COOKIE);
+  if (token && verifyToken(token)) {
     return next();
   }
   res.status(401).json({ error: "No autorizado" });
@@ -133,26 +158,28 @@ export function registerRoutes(app: Express): Server {
     }
 
     if (passwords.includes(password)) {
-      req.session.isAdmin = true;
+      const expiry = Date.now() + AUTH_MAX_AGE;
+      const token = signToken(`admin:${expiry}`);
+      res.cookie(AUTH_COOKIE, token, {
+        httpOnly: true,
+        maxAge: AUTH_MAX_AGE,
+        sameSite: "lax",
+        path: "/",
+      });
       return res.json({ message: "Login exitoso" });
     }
 
     res.status(401).json({ error: "Contraseña incorrecta" });
   });
 
-  app.post("/api/logout", (req, res) => {
-    req.session.destroy((err) => {
-      if (err)
-        return res
-          .status(500)
-          .json({ error: "Error al cerrar sesión" });
-      res.clearCookie("connect.sid");
-      res.json({ message: "Sesión cerrada" });
-    });
+  app.post("/api/logout", (_req, res) => {
+    res.clearCookie(AUTH_COOKIE, { path: "/" });
+    res.json({ message: "Sesión cerrada" });
   });
 
   app.get("/api/auth/status", (req, res) => {
-    res.json({ authenticated: !!req.session?.isAdmin });
+    const token = getCookie(req, AUTH_COOKIE);
+    res.json({ authenticated: !!(token && verifyToken(token)) });
   });
 
   // --- Files listing ---
