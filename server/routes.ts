@@ -98,9 +98,10 @@ export function registerRoutes(app: Express): Server {
   const httpServer = createServer(app);
 
   const corsOptions = {
-    origin: "*",
-    methods: ["GET", "POST", "DELETE"],
+    origin: true,
+    methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type"],
+    credentials: true,
   };
 
   app.use(cors(corsOptions));

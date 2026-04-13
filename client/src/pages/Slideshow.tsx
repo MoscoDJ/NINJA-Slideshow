@@ -178,7 +178,6 @@ export default function Slideshow() {
           autoPlay
           muted
           playsInline
-          crossOrigin="anonymous"
           preload="auto"
           onLoadedData={() => setIsLoading(false)}
           onError={() => goToNextSlide()}
@@ -189,7 +188,6 @@ export default function Slideshow() {
           src={currentFile.url}
           alt={currentFile.name}
           className={`w-full h-full object-contain transition-opacity duration-1000 ${opacityClass}`}
-          crossOrigin="anonymous"
           onLoad={() => setIsLoading(false)}
           onError={() => goToNextSlide()}
         />
