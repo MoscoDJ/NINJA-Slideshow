@@ -32,6 +32,7 @@ import {
   useSortable,
   rectSwappingStrategy,
 } from "@dnd-kit/sortable";
+import { queryClient } from "@/lib/queryClient";
 import Login from "./Login";
 
 interface SlideFile {
@@ -158,6 +159,11 @@ export default function Admin() {
 
 // --- API helper ---
 
+function forceReLogin() {
+  queryClient.setQueryData(["/api/auth/status"], { authenticated: false });
+  queryClient.invalidateQueries({ queryKey: ["/api/auth/status"] });
+}
+
 async function apiJson(url: string, body: Record<string, unknown>) {
   const res = await fetch(url, {
     method: "POST",
@@ -165,6 +171,10 @@ async function apiJson(url: string, body: Record<string, unknown>) {
     credentials: "include",
     body: JSON.stringify(body),
   });
+  if (res.status === 401) {
+    forceReLogin();
+    throw new Error("Sesión expirada, inicia sesión de nuevo");
+  }
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data.error || `Request failed (${res.status})`);
@@ -344,6 +354,7 @@ function AdminPanel() {
         method: "DELETE",
         credentials: "include",
       });
+      if (response.status === 401) { forceReLogin(); throw new Error("Sesión expirada"); }
       if (!response.ok) throw new Error("Delete failed");
       return response.json();
     },
@@ -367,6 +378,7 @@ function AdminPanel() {
         credentials: "include",
         body: JSON.stringify({ order: newOrder }),
       });
+      if (response.status === 401) { forceReLogin(); throw new Error("Sesión expirada"); }
       if (!response.ok) throw new Error("Failed to update order");
       return response.json();
     },
