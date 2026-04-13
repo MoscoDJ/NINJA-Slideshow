@@ -38,6 +38,9 @@ const BUCKET_NAME = process.env.BUCKET_NAME || "ninjacdn";
 const FOLDER_NAME = "slideshow";
 const SPACES_REGION = "sfo3";
 const SPACES_HOST = `${SPACES_REGION}.digitaloceanspaces.com`;
+const CDN_HOST =
+  process.env.SPACES_CDN_ENDPOINT ||
+  `${SPACES_REGION}.cdn.digitaloceanspaces.com`;
 
 if (!process.env.SPACES_KEY || !process.env.SPACES_SECRET_KEY) {
   console.error("ERROR: Missing Digital Ocean Spaces credentials");
@@ -181,7 +184,7 @@ export function registerRoutes(app: Express): Server {
             : 0;
           return {
             name: path.basename(item.Key!),
-            url: `https://${BUCKET_NAME}.${SPACES_HOST}/${item.Key}?v=${ts}`,
+            url: `https://${BUCKET_NAME}.${CDN_HOST}/${item.Key}?v=${ts}`,
             type: path.extname(item.Key!).toLowerCase(),
             lastModified: item.LastModified?.toISOString(),
           };

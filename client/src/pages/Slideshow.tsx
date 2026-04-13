@@ -38,6 +38,7 @@ export default function Slideshow() {
   const transitionRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const progressRaf = useRef<number | null>(null);
   const slideStart = useRef(0);
+  const advancing = useRef(false);
 
   const { data: files = [], refetch } = useQuery<SlideFile[]>({
     queryKey: ["/api/files"],
@@ -58,23 +59,23 @@ export default function Slideshow() {
   const startImageProgressBar = useCallback(() => {
     slideStart.current = performance.now();
     setProgress(0);
-
     const tick = () => {
       const elapsed = performance.now() - slideStart.current;
       const pct = Math.min((elapsed / IMAGE_DURATION) * 100, 100);
       setProgress(pct);
-      if (pct < 100) {
-        progressRaf.current = requestAnimationFrame(tick);
-      }
+      if (pct < 100) progressRaf.current = requestAnimationFrame(tick);
     };
     progressRaf.current = requestAnimationFrame(tick);
   }, []);
 
   const goToNextSlide = useCallback(() => {
+    if (advancing.current) return;
+    advancing.current = true;
+
     if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null; }
     stopProgressBar();
-
     setFadeOut(true);
+
     transitionRef.current = setTimeout(() => {
       releaseVideo(videoRef.current);
       videoRef.current = null;
@@ -93,10 +94,12 @@ export default function Slideshow() {
       setFadeOut(false);
       setIsLoading(true);
       setProgress(0);
+      advancing.current = false;
     }, FADE_DURATION);
   }, [files.length, stopProgressBar]);
 
-  // Slide timer / video-ended handler
+  // Attach video event handlers via DOM (not React synthetic events)
+  // to avoid issues with releaseVideo triggering React's onError
   useEffect(() => {
     if (!files.length || isLoading) return;
     const file = files[currentIndex];
@@ -104,7 +107,7 @@ export default function Slideshow() {
     if (isVideo(file.type)) {
       const vid = videoRef.current;
       if (vid) {
-        vid.onended = goToNextSlide;
+        vid.onended = () => goToNextSlide();
         vid.ontimeupdate = () => {
           if (vid.duration && isFinite(vid.duration)) {
             setProgress((vid.currentTime / vid.duration) * 100);
@@ -124,7 +127,6 @@ export default function Slideshow() {
     };
   }, [currentIndex, files.length, isLoading, goToNextSlide, startImageProgressBar, stopProgressBar]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       releaseVideo(videoRef.current);
@@ -141,6 +143,8 @@ export default function Slideshow() {
   }
 
   const currentFile = files[currentIndex];
+  if (!currentFile) return null;
+
   const opacityClass = fadeOut ? "opacity-0" : isLoading ? "opacity-0" : "opacity-100";
 
   return (
@@ -180,7 +184,6 @@ export default function Slideshow() {
           playsInline
           preload="auto"
           onLoadedData={() => setIsLoading(false)}
-          onError={() => goToNextSlide()}
         />
       ) : (
         <img
@@ -189,7 +192,6 @@ export default function Slideshow() {
           alt={currentFile.name}
           className={`w-full h-full object-contain transition-opacity duration-1000 ${opacityClass}`}
           onLoad={() => setIsLoading(false)}
-          onError={() => goToNextSlide()}
         />
       )}
     </div>
