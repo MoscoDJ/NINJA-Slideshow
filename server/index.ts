@@ -6,9 +6,8 @@ import { setupVite, serveStatic, log } from "./vite";
 
 const app = express();
 
-if (process.env.NODE_ENV === "production") {
-  app.set("trust proxy", 1);
-}
+// Trust all proxies in the chain (Cloudflare + DO App Platform)
+app.set("trust proxy", true);
 
 const MemoryStore = (createMemoryStore as any)(session);
 
@@ -19,10 +18,11 @@ app.use(
     saveUninitialized: false,
     store: new MemoryStore({ checkPeriod: 86400000 }),
     cookie: {
-      secure: process.env.NODE_ENV === "production",
+      secure: process.env.NODE_ENV === "production" ? true : false,
       httpOnly: true,
       maxAge: 24 * 60 * 60 * 1000,
       sameSite: "lax",
+      proxy: true,
     },
   }),
 );
