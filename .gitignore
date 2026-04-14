@@ -17,3 +17,7 @@ coverage
 build/
 *.log
 *.bak
+Releases/*.apk
+Releases/*.zip
+Releases/*.ipk
+Releases/*.wgt
