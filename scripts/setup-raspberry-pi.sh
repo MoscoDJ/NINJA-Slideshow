@@ -28,17 +28,18 @@ sudo apt-get update && sudo apt-get upgrade -y
 
 # --- 2. Install minimal X11 + Chromium (no desktop) ---
 echo "[2/6] Installing minimal kiosk packages..."
-# chromium-browser on older Pi OS, chromium on Debian Trixie+
-CHROMIUM_PKG="chromium-browser"
-if ! apt-cache show chromium-browser &>/dev/null; then
-  CHROMIUM_PKG="chromium"
-fi
-
 sudo apt-get install -y \
   xserver-xorg x11-xserver-utils xinit \
-  $CHROMIUM_PKG \
   unclutter \
   --no-install-recommends
+
+# Install chromium (package name varies by distro)
+sudo apt-get install -y chromium 2>/dev/null || \
+sudo apt-get install -y chromium-browser 2>/dev/null || {
+  echo "ERROR: Could not install Chromium. Install manually:"
+  echo "  sudo apt-get install -y chromium"
+  exit 1
+}
 
 # --- 3. Create kiosk startup script ---
 echo "[3/6] Creating kiosk script..."
