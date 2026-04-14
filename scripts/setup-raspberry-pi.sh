@@ -48,20 +48,14 @@ mkdir -p "$HOME/.config/ninja-slideshow"
 cat > "$HOME/.config/ninja-slideshow/kiosk.sh" << KIOSK
 #!/bin/bash
 
-# Disable screen blanking
 xset s off
 xset -dpms
 xset s noblank
 
-# Force full resolution on HDMI
-xrandr --output HDMI-1 --mode 1920x1080 --rate 60 2>/dev/null || \\
-xrandr --output HDMI-2 --mode 1920x1080 --rate 60 2>/dev/null || true
-sleep 2
-
-# Hide mouse cursor
 unclutter -idle 0 -root &
 
-# Launch Chromium in kiosk mode (binary name varies by distro)
+sleep 2
+
 CHROMIUM=\$(command -v chromium-browser || command -v chromium)
 \$CHROMIUM \\
   --kiosk \\
@@ -71,18 +65,16 @@ CHROMIUM=\$(command -v chromium-browser || command -v chromium)
   --disable-restore-session-state \\
   --disable-translate \\
   --disable-features=TranslateUI,Translate \\
-  --disable-popup-blocking \\
   --disable-component-update \\
   --check-for-update-interval=31536000 \\
   --autoplay-policy=no-user-gesture-required \\
   --start-fullscreen \\
+  --start-maximized \\
   --incognito \\
   --no-first-run \\
   --disable-pinch \\
   --overscroll-history-navigation=0 \\
   --lang=es \\
-  --window-size=1920,1080 \\
-  --window-position=0,0 \\
   "$SERVER_URL"
 KIOSK
 
