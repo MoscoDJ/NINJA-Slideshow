@@ -2,12 +2,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
-import 'package:wakelock_plus/wakelock_plus.dart';
 import 'screens/config_screen.dart';
 import 'screens/slideshow_screen.dart';
 import 'services/settings_service.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
 
@@ -17,17 +16,12 @@ void main() {
     DeviceOrientation.landscapeRight,
   ]);
 
-  // Keep screen awake — not available on all Linux desktops, safe to ignore
-  try {
-    WakelockPlus.enable();
-  } catch (_) {}
-
-  // For Linux (Raspberry Pi): disable screen blanking via xset
+  // Disable screen blanking on Linux (Pi) via xset
   if (Platform.isLinux) {
     try {
-      Process.run('xset', ['s', 'off']);
-      Process.run('xset', ['-dpms']);
-      Process.run('xset', ['s', 'noblank']);
+      await Process.run('xset', ['s', 'off']);
+      await Process.run('xset', ['-dpms']);
+      await Process.run('xset', ['s', 'noblank']);
     } catch (_) {}
   }
 

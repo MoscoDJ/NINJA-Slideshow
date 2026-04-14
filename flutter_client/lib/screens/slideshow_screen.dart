@@ -33,14 +33,20 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
   int _currentIndex = 0;
   bool _initialLoading = true;
   double _fadeOpacity = 1.0;
+  double _progress = 0.0;
   int _imageDuration = 15;
 
   Player? _player;
   VideoController? _videoController;
   Timer? _imageTimer;
+  Timer? _videoTimeoutTimer;
+  Timer? _progressTimer;
   StreamSubscription? _socketSub;
   StreamSubscription? _playerCompleteSub;
+  StreamSubscription? _playerPlayingSub;
   bool _disposed = false;
+  bool _videoStarted = false;
+  DateTime? _slideStartTime;
 
   @override
   void initState() {
@@ -72,7 +78,6 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
         if (indexReset) _currentIndex = 0;
       });
 
-      // Start showing content immediately, cache in background
       _startCurrentSlide();
       _cache.syncInBackground(files);
     } catch (e) {
@@ -83,15 +88,36 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
   }
 
   void _startCurrentSlide() {
-    _cancelTimers();
+    _cancelAllTimers();
     if (_files.isEmpty) return;
     final file = _files[_currentIndex];
+    _slideStartTime = DateTime.now();
+    _progress = 0.0;
 
     if (file.isVideo) {
+      _videoStarted = false;
       _playVideo(file);
+      // Safety timeout: skip video if it doesn't start within 15s
+      _videoTimeoutTimer = Timer(const Duration(seconds: 15), () {
+        if (!_videoStarted) {
+          debugPrint('Video timeout, skipping: ${file.name}');
+          _goToNext();
+        }
+      });
     } else {
       _imageTimer = Timer(Duration(seconds: _imageDuration), _goToNext);
+      _startProgressTicker();
     }
+  }
+
+  void _startProgressTicker() {
+    _progressTimer?.cancel();
+    _progressTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      if (_slideStartTime == null || _disposed) return;
+      final elapsed = DateTime.now().difference(_slideStartTime!).inMilliseconds;
+      final total = _imageDuration * 1000;
+      setState(() => _progress = (elapsed / total).clamp(0.0, 1.0));
+    });
   }
 
   void _playVideo(SlideFile file) {
@@ -101,14 +127,33 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
     _videoController = VideoController(_player!);
 
     _playerCompleteSub = _player!.stream.completed.listen((completed) {
-      if (completed) _goToNext();
+      if (completed && _videoStarted) _goToNext();
     });
 
-    // Use cached file if available, otherwise stream from URL
+    // Track when video actually starts playing
+    _playerPlayingSub = _player!.stream.playing.listen((playing) {
+      if (playing && !_videoStarted) {
+        _videoStarted = true;
+        _videoTimeoutTimer?.cancel();
+        _slideStartTime = DateTime.now();
+      }
+    });
+
+    // Track video progress
+    _player!.stream.position.listen((position) {
+      if (_disposed) return;
+      final duration = _player?.state.duration ?? Duration.zero;
+      if (duration.inMilliseconds > 0) {
+        setState(() => _progress = (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0));
+      }
+    });
+
     final localPath = _cache.getCachedPath(file);
     final source = (localPath != null && File(localPath).existsSync())
         ? 'file://$localPath'
         : file.url;
+
+    debugPrint('Playing: ${file.name} from ${localPath != null ? "cache" : "network"}');
     _player!.open(Media(source));
 
     setState(() {});
@@ -117,6 +162,7 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
   void _goToNext() {
     if (_files.isEmpty || _disposed) return;
 
+    _cancelAllTimers();
     setState(() => _fadeOpacity = 0.0);
 
     Future.delayed(const Duration(milliseconds: 800), () {
@@ -125,19 +171,26 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
       setState(() {
         _currentIndex = (_currentIndex + 1) % _files.length;
         _fadeOpacity = 1.0;
+        _progress = 0.0;
       });
       _startCurrentSlide();
     });
   }
 
-  void _cancelTimers() {
+  void _cancelAllTimers() {
     _imageTimer?.cancel();
     _imageTimer = null;
+    _videoTimeoutTimer?.cancel();
+    _videoTimeoutTimer = null;
+    _progressTimer?.cancel();
+    _progressTimer = null;
   }
 
   void _disposePlayer() {
     _playerCompleteSub?.cancel();
     _playerCompleteSub = null;
+    _playerPlayingSub?.cancel();
+    _playerPlayingSub = null;
     _player?.dispose();
     _player = null;
     _videoController = null;
@@ -146,7 +199,7 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
   @override
   void dispose() {
     _disposed = true;
-    _cancelTimers();
+    _cancelAllTimers();
     _disposePlayer();
     _socketSub?.cancel();
     _socket.dispose();
@@ -180,6 +233,19 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
                   duration: const Duration(milliseconds: 800),
                   child: _buildSlide(),
                 ),
+              // Progress bar
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: LinearProgressIndicator(
+                  value: _progress,
+                  minHeight: 3,
+                  backgroundColor: Colors.black26,
+                  valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFEC1C24)),
+                ),
+              ),
+              // Connection indicator
               Positioned(
                 top: 8,
                 right: 8,
@@ -199,10 +265,7 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
         children: [
           CircularProgressIndicator(color: Colors.red),
           SizedBox(height: 16),
-          Text(
-            'Cargando contenido...',
-            style: TextStyle(color: Colors.white54),
-          ),
+          Text('Cargando contenido...', style: TextStyle(color: Colors.white54)),
         ],
       ),
     );
@@ -210,10 +273,7 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
 
   Widget _buildEmpty() {
     return const Center(
-      child: Text(
-        'No hay contenido disponible',
-        style: TextStyle(color: Colors.white54, fontSize: 20),
-      ),
+      child: Text('No hay contenido disponible', style: TextStyle(color: Colors.white54, fontSize: 20)),
     );
   }
 
@@ -221,15 +281,9 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
     final file = _files[_currentIndex];
 
     if (file.isVideo && _videoController != null) {
-      return Center(
-        child: Video(
-          controller: _videoController!,
-          fill: Colors.black,
-        ),
-      );
+      return Video(controller: _videoController!, fill: Colors.black);
     }
 
-    // Use cached file if available, otherwise load from network
     final localPath = _cache.getCachedPath(file);
     if (localPath != null && File(localPath).existsSync()) {
       return Image.file(
@@ -237,7 +291,7 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
         fit: BoxFit.contain,
         width: double.infinity,
         height: double.infinity,
-        errorBuilder: (_, error, stack) => _buildNetworkImage(file),
+        errorBuilder: (_, e, s) => _buildNetworkImage(file),
       );
     }
 
@@ -252,11 +306,9 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
       height: double.infinity,
       loadingBuilder: (_, child, progress) {
         if (progress == null) return child;
-        return const Center(
-          child: CircularProgressIndicator(color: Colors.red),
-        );
+        return const Center(child: CircularProgressIndicator(color: Colors.red));
       },
-      errorBuilder: (_, error, stack) => const Center(
+      errorBuilder: (_, e, s) => const Center(
         child: Icon(Icons.broken_image, color: Colors.white24, size: 64),
       ),
     );
