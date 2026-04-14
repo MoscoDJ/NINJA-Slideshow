@@ -1,99 +1,90 @@
 #!/bin/bash
 set -e
 
-# NINJA Slideshow — Raspberry Pi Setup Script
+# NINJA Slideshow — Raspberry Pi Kiosk Setup
+# Launches Chromium in fullscreen kiosk mode pointing to the slideshow.
 # Run on a fresh Raspberry Pi OS (64-bit, Desktop)
-# Usage: bash setup-raspberry-pi.sh
+# Usage: bash setup-raspberry-pi.sh <SERVER_URL>
+#
+# Example: bash setup-raspberry-pi.sh https://your-domain.com
 
-REPO_URL="https://github.com/MoscoDJ/NINJA-Slideshow.git"
-INSTALL_DIR="/opt/ninja-slideshow"
-APP_DIR="$HOME/ninja-slideshow"
+SERVER_URL="${1:-}"
+
+if [ -z "$SERVER_URL" ]; then
+  echo "Usage: bash setup-raspberry-pi.sh <SERVER_URL>"
+  echo "Example: bash setup-raspberry-pi.sh https://your-domain.com"
+  exit 1
+fi
 
 echo "============================================"
 echo "  NINJA Slideshow — Raspberry Pi Setup"
+echo "  Server: $SERVER_URL"
 echo "============================================"
 echo ""
 
 # --- 1. System update ---
-echo "[1/7] Updating system..."
+echo "[1/5] Updating system..."
 sudo apt-get update && sudo apt-get upgrade -y
 
-# --- 2. Install build dependencies ---
-echo "[2/7] Installing build dependencies..."
-sudo apt-get install -y \
-  git curl unzip xz-utils wget \
-  clang lld llvm cmake ninja-build pkg-config \
-  libgtk-3-dev liblzma-dev libstdc++-12-dev \
-  libmpv-dev \
-  mesa-utils
+# --- 2. Install Chromium + tools ---
+echo "[2/5] Installing dependencies..."
+sudo apt-get install -y chromium-browser unclutter xdotool
 
-# --- 3. Install Flutter SDK ---
-echo "[3/7] Installing Flutter SDK..."
-if [ -d "$HOME/flutter" ]; then
-  echo "  Flutter directory exists, updating..."
-  cd "$HOME/flutter" && git pull
-else
-  git clone https://github.com/flutter/flutter.git -b stable --depth 1 "$HOME/flutter"
-fi
+# --- 3. Create kiosk startup script ---
+echo "[3/5] Creating kiosk script..."
+mkdir -p "$HOME/.config/ninja-slideshow"
 
-export PATH="$HOME/flutter/bin:$PATH"
-
-if ! grep -q 'flutter/bin' "$HOME/.bashrc"; then
-  echo 'export PATH="$HOME/flutter/bin:$PATH"' >> "$HOME/.bashrc"
-fi
-
-echo "  Running flutter doctor..."
-flutter doctor
-flutter config --enable-linux-desktop
-
-# --- 4. Clone repo and build ---
-echo "[4/7] Cloning repository..."
-if [ -d "$APP_DIR" ]; then
-  echo "  Directory exists, pulling latest..."
-  cd "$APP_DIR" && git pull
-else
-  git clone "$REPO_URL" "$APP_DIR"
-fi
-
-echo "[5/7] Building Flutter app..."
-cd "$APP_DIR/flutter_client"
-flutter pub get
-flutter build linux --release
-
-# --- 5. Install the built app ---
-echo "[6/7] Installing to $INSTALL_DIR..."
-sudo mkdir -p "$INSTALL_DIR"
-sudo cp -r build/linux/arm64/release/bundle/* "$INSTALL_DIR/"
-sudo chmod +x "$INSTALL_DIR/ninja_slideshow"
-
-# --- 6. Setup systemd service + auto-start ---
-echo "[7/7] Configuring auto-start..."
-
-sudo tee /etc/systemd/system/ninja-slideshow.service > /dev/null << EOF
-[Unit]
-Description=NINJA Slideshow
-After=graphical-session.target
-StartLimitIntervalSec=60
-StartLimitBurst=5
-
-[Service]
-Type=simple
-User=$USER
-Environment=DISPLAY=:0
-Environment=XDG_RUNTIME_DIR=/run/user/$(id -u)
-WorkingDirectory=$INSTALL_DIR
-ExecStart=$INSTALL_DIR/ninja_slideshow
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=graphical-session.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable ninja-slideshow
+cat > "$HOME/.config/ninja-slideshow/kiosk.sh" << KIOSK
+#!/bin/bash
 
 # Disable screen blanking
+xset s off
+xset -dpms
+xset s noblank
+
+# Hide mouse cursor after 3 seconds
+unclutter -idle 3 -root &
+
+# Wait for desktop to be ready
+sleep 5
+
+# Launch Chromium in kiosk mode
+chromium-browser \\
+  --kiosk \\
+  --noerrdialogs \\
+  --disable-infobars \\
+  --disable-session-crashed-bubble \\
+  --disable-restore-session-state \\
+  --disable-features=TranslateUI \\
+  --check-for-update-interval=31536000 \\
+  --autoplay-policy=no-user-gesture-required \\
+  --start-fullscreen \\
+  --incognito \\
+  "$SERVER_URL" &
+KIOSK
+
+chmod +x "$HOME/.config/ninja-slideshow/kiosk.sh"
+
+# --- 4. Auto-start on boot ---
+echo "[4/5] Configuring auto-start..."
+mkdir -p "$HOME/.config/autostart"
+
+cat > "$HOME/.config/autostart/ninja-slideshow.desktop" << DESKTOP
+[Desktop Entry]
+Type=Application
+Name=NINJA Slideshow
+Exec=$HOME/.config/ninja-slideshow/kiosk.sh
+X-GNOME-Autostart-enabled=true
+DESKTOP
+
+# Also add to LXDE autostart if present
+if [ -f /etc/xdg/lxsession/LXDE-pi/autostart ]; then
+  if ! grep -q 'ninja-slideshow' /etc/xdg/lxsession/LXDE-pi/autostart; then
+    echo "@$HOME/.config/ninja-slideshow/kiosk.sh" | sudo tee -a /etc/xdg/lxsession/LXDE-pi/autostart > /dev/null
+  fi
+fi
+
+# Disable screen blanking system-wide
 if [ -f /etc/xdg/lxsession/LXDE-pi/autostart ]; then
   if ! grep -q 'xset s off' /etc/xdg/lxsession/LXDE-pi/autostart; then
     sudo tee -a /etc/xdg/lxsession/LXDE-pi/autostart > /dev/null << 'EOF'
@@ -104,16 +95,19 @@ EOF
   fi
 fi
 
+# --- 5. Enable auto-login ---
+echo "[5/5] Enabling desktop auto-login..."
+sudo raspi-config nonint do_boot_behaviour B4 2>/dev/null || echo "  Set auto-login manually: sudo raspi-config > System > Boot > Desktop Autologin"
+
 echo ""
 echo "============================================"
 echo "  Setup complete!"
 echo "============================================"
 echo ""
-echo "  To start now:  sudo systemctl start ninja-slideshow"
-echo "  To run manually: $INSTALL_DIR/ninja_slideshow"
+echo "  Server URL: $SERVER_URL"
+echo "  To change URL later, edit:"
+echo "    $HOME/.config/ninja-slideshow/kiosk.sh"
 echo ""
-echo "  On first launch, configure the server URL"
-echo "  (press Esc or S to open settings anytime)"
-echo ""
-echo "  Reboot recommended: sudo reboot"
+echo "  To start now:  bash $HOME/.config/ninja-slideshow/kiosk.sh"
+echo "  Or reboot:     sudo reboot"
 echo ""

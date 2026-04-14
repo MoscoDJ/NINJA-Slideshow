@@ -188,15 +188,14 @@ El slideshow web funciona en cualquier browser moderno accediendo a la ruta `/`.
 Incluye manejo agresivo de memoria para funcionar en browsers limitados
 (Smart TVs): limpieza explicita de buffers de video y auto-reload periodico.
 
-### Raspberry Pi (Flutter Linux)
+### Raspberry Pi (Chromium kiosk)
 
-App nativa Flutter con cache local, Socket.IO, y reproduccion de video
-via media_kit (libmpv). Ver [`flutter_client/README.md`](flutter_client/README.md)
-para instrucciones completas de setup desde cero.
+Chromium en modo kiosk fullscreen apuntando al slideshow web.
+Hardware video decoding nativo, sin compilacion, sin dependencias de Flutter.
 
 ```bash
-cd flutter_client
-flutter build linux --release
+bash scripts/setup-raspberry-pi.sh https://your-domain.com
+sudo reboot
 ```
 
 ### Android TV — Haier, Sharp (Flutter APK)
@@ -241,7 +240,7 @@ tizen install -n NINJASlideshow.wgt -t <serial>
 | Plataforma | Marcas | Directorio | Compilacion | Output |
 |---|---|---|---|---|
 | Browser | Cualquiera | `client/` | `npm run build` | SPA (servida por Express) |
-| Linux Desktop | Raspberry Pi | `flutter_client/` | `flutter build linux` | Binario nativo |
+| Chromium Kiosk | Raspberry Pi | `scripts/` | `setup-raspberry-pi.sh` | Chromium fullscreen |
 | Android TV | Haier, Sharp | `flutter_client/` | `flutter build apk` | APK |
 | webOS | LG | `webos_app/` | `ares-package` | IPK |
 | Tizen | Samsung | `tizen_app/` | `tizen package` | WGT |
