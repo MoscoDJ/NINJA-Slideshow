@@ -23,15 +23,22 @@
       position: absolute; top: 50%; left: 50%;
       width: 48px; height: 48px;
       margin: -24px 0 0 -24px;
-      border: 4px solid #333; border-top-color: #e00;
+      border: 4px solid #333; border-top-color: #ec1c24;
       border-radius: 50%;
       animation: spin 0.8s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
+    #progress-bar {
+      position: absolute; top: 0; left: 0;
+      width: 0%; height: 3px;
+      background: #ec1c24;
+      z-index: 100;
+      transition: width 0.25s linear;
+    }
     #status {
       position: absolute; top: 8px; right: 8px;
       width: 10px; height: 10px; border-radius: 50%;
-      background: #f00;
+      background: #f00; z-index: 101;
     }
     #status.connected { background: #0f0; }
     #msg {
@@ -42,6 +49,7 @@
   </style>
 </head>
 <body>
+  <div id="progress-bar"></div>
   <div id="spinner" class="spinner"></div>
   <div id="msg" style="display:none">No content available</div>
   <div id="status"></div>
@@ -58,15 +66,36 @@
       var loopCount = 0;
       var activeEl = null;
       var timer = null;
+      var progressTimer = null;
+      var slideStart = 0;
       var socket = null;
 
       var container = document.body;
       var spinner = document.getElementById("spinner");
       var msg = document.getElementById("msg");
       var statusDot = document.getElementById("status");
+      var progressBar = document.getElementById("progress-bar");
 
       function isVideo(type) {
         return type === ".mp4" || type === ".webm";
+      }
+
+      function setProgress(pct) {
+        progressBar.style.width = Math.min(pct, 100) + "%";
+      }
+
+      function startImageProgress() {
+        slideStart = Date.now();
+        setProgress(0);
+        if (progressTimer) clearInterval(progressTimer);
+        progressTimer = setInterval(function () {
+          var elapsed = Date.now() - slideStart;
+          setProgress((elapsed / IMAGE_DURATION) * 100);
+        }, 100);
+      }
+
+      function stopProgress() {
+        if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
       }
 
       function releaseElement(el) {
@@ -75,6 +104,7 @@
           el.onended = null;
           el.onloadeddata = null;
           el.onerror = null;
+          el.ontimeupdate = null;
           el.pause();
           el.removeAttribute("src");
           el.load();
@@ -91,6 +121,8 @@
           return;
         }
         msg.style.display = "none";
+        stopProgress();
+        setProgress(0);
         var file = files[idx];
         var el;
 
@@ -106,6 +138,11 @@
             spinner.style.display = "none";
             el.className = "";
           };
+          el.ontimeupdate = function () {
+            if (el.duration && isFinite(el.duration)) {
+              setProgress((el.currentTime / el.duration) * 100);
+            }
+          };
           el.onended = function () { advance(); };
           el.onerror = function () { advance(); };
         } else {
@@ -117,6 +154,7 @@
           el.onload = function () {
             spinner.style.display = "none";
             el.className = "";
+            startImageProgress();
             timer = setTimeout(advance, IMAGE_DURATION);
           };
           el.onerror = function () { advance(); };
@@ -133,8 +171,11 @@
 
       function advance() {
         if (timer) { clearTimeout(timer); timer = null; }
+        stopProgress();
+        setProgress(0);
         if (activeEl && activeEl.tagName === "VIDEO") {
           activeEl.onended = null;
+          activeEl.ontimeupdate = null;
           activeEl.pause();
         }
         idx = (idx + 1) % files.length;
@@ -176,30 +217,22 @@
       function connectSocket() {
         try {
           socket = io(SERVER_URL, { transports: ["websocket", "polling"] });
-          socket.on("connect", function () {
-            statusDot.className = "connected";
-          });
-          socket.on("disconnect", function () {
-            statusDot.className = "";
-          });
-          socket.on("filesUpdated", function () {
-            fetchFiles();
-          });
+          socket.on("connect", function () { statusDot.className = "connected"; });
+          socket.on("disconnect", function () { statusDot.className = ""; });
+          socket.on("filesUpdated", function () { fetchFiles(); });
         } catch (e) {
           setInterval(fetchFiles, 30000);
         }
       }
 
-      // Prevent screen saver (Tizen specific)
       try {
         if (typeof tizen !== "undefined" && tizen.power) {
           tizen.power.request("SCREEN", "SCREEN_NORMAL");
         }
       } catch (e) {}
 
-      // Handle Tizen remote back button
       document.addEventListener("keydown", function (e) {
-        if (e.keyCode === 10009) { // TizenKey BACK
+        if (e.keyCode === 10009) {
           try { tizen.application.getCurrentApplication().exit(); } catch (ex) {}
         }
       });
