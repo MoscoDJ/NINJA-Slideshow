@@ -28,9 +28,15 @@ sudo apt-get update && sudo apt-get upgrade -y
 
 # --- 2. Install minimal X11 + Chromium (no desktop) ---
 echo "[2/6] Installing minimal kiosk packages..."
+# chromium-browser on older Pi OS, chromium on Debian Trixie+
+CHROMIUM_PKG="chromium-browser"
+if ! apt-cache show chromium-browser &>/dev/null; then
+  CHROMIUM_PKG="chromium"
+fi
+
 sudo apt-get install -y \
   xserver-xorg x11-xserver-utils xinit \
-  chromium-browser \
+  $CHROMIUM_PKG \
   unclutter \
   --no-install-recommends
 
@@ -49,8 +55,9 @@ xset s noblank
 # Hide mouse cursor
 unclutter -idle 0 -root &
 
-# Launch Chromium in kiosk mode
-chromium-browser \\
+# Launch Chromium in kiosk mode (binary name varies by distro)
+CHROMIUM=\$(command -v chromium-browser || command -v chromium)
+\$CHROMIUM \\
   --kiosk \\
   --noerrdialogs \\
   --disable-infobars \\
