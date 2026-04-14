@@ -2,8 +2,6 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart';
 import '../models/slide_file.dart';
 import '../services/api_service.dart';
 import '../services/cache_service.dart';
@@ -32,20 +30,16 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
   List<SlideFile> _files = [];
   int _currentIndex = 0;
   bool _initialLoading = true;
+  bool _playingVideo = false;
   double _fadeOpacity = 1.0;
   double _progress = 0.0;
   int _imageDuration = 15;
 
-  Player? _player;
-  VideoController? _videoController;
   Timer? _imageTimer;
-  Timer? _videoTimeoutTimer;
   Timer? _progressTimer;
   StreamSubscription? _socketSub;
-  StreamSubscription? _playerCompleteSub;
-  StreamSubscription? _playerPlayingSub;
+  Process? _mpvProcess;
   bool _disposed = false;
-  bool _videoStarted = false;
   DateTime? _slideStartTime;
 
   @override
@@ -95,16 +89,9 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
     _progress = 0.0;
 
     if (file.isVideo) {
-      _videoStarted = false;
-      _playVideo(file);
-      // Safety timeout: skip video if it doesn't start within 15s
-      _videoTimeoutTimer = Timer(const Duration(seconds: 15), () {
-        if (!_videoStarted) {
-          debugPrint('Video timeout, skipping: ${file.name}');
-          _goToNext();
-        }
-      });
+      _playVideoExternal(file);
     } else {
+      setState(() => _playingVideo = false);
       _imageTimer = Timer(Duration(seconds: _imageDuration), _goToNext);
       _startProgressTicker();
     }
@@ -120,43 +107,43 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
     });
   }
 
-  void _playVideo(SlideFile file) {
-    _disposePlayer();
-
-    _player = Player();
-    _videoController = VideoController(_player!);
-
-    _playerCompleteSub = _player!.stream.completed.listen((completed) {
-      if (completed && _videoStarted) _goToNext();
-    });
-
-    // Track when video actually starts playing
-    _playerPlayingSub = _player!.stream.playing.listen((playing) {
-      if (playing && !_videoStarted) {
-        _videoStarted = true;
-        _videoTimeoutTimer?.cancel();
-        _slideStartTime = DateTime.now();
-      }
-    });
-
-    // Track video progress
-    _player!.stream.position.listen((position) {
-      if (_disposed) return;
-      final duration = _player?.state.duration ?? Duration.zero;
-      if (duration.inMilliseconds > 0) {
-        setState(() => _progress = (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0));
-      }
-    });
-
+  /// Play video using mpv as external process.
+  /// media_kit's EGL texture sharing doesn't work on the Pi's VideoCore GPU.
+  Future<void> _playVideoExternal(SlideFile file) async {
     final localPath = _cache.getCachedPath(file);
     final source = (localPath != null && File(localPath).existsSync())
-        ? 'file://$localPath'
+        ? localPath
         : file.url;
 
-    debugPrint('Playing: ${file.name} from ${localPath != null ? "cache" : "network"}');
-    _player!.open(Media(source));
+    debugPrint('Playing video: ${file.name} via mpv (${localPath != null ? "cache" : "network"})');
 
-    setState(() {});
+    setState(() {
+      _playingVideo = true;
+      _progress = 0.0;
+    });
+
+    try {
+      _mpvProcess = await Process.start('mpv', [
+        '--fullscreen',
+        '--no-terminal',
+        '--really-quiet',
+        '--no-input-default-bindings',
+        '--keep-open=no',
+        source,
+      ]);
+
+      // Wait for mpv to exit (video finished or error)
+      final exitCode = await _mpvProcess!.exitCode;
+      debugPrint('mpv exited with code $exitCode');
+    } catch (e) {
+      debugPrint('mpv error: $e');
+    }
+
+    _mpvProcess = null;
+
+    if (_disposed) return;
+    setState(() => _playingVideo = false);
+    _goToNext();
   }
 
   void _goToNext() {
@@ -167,7 +154,6 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
 
     Future.delayed(const Duration(milliseconds: 800), () {
       if (_disposed) return;
-      _disposePlayer();
       setState(() {
         _currentIndex = (_currentIndex + 1) % _files.length;
         _fadeOpacity = 1.0;
@@ -180,27 +166,20 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
   void _cancelAllTimers() {
     _imageTimer?.cancel();
     _imageTimer = null;
-    _videoTimeoutTimer?.cancel();
-    _videoTimeoutTimer = null;
     _progressTimer?.cancel();
     _progressTimer = null;
   }
 
-  void _disposePlayer() {
-    _playerCompleteSub?.cancel();
-    _playerCompleteSub = null;
-    _playerPlayingSub?.cancel();
-    _playerPlayingSub = null;
-    _player?.dispose();
-    _player = null;
-    _videoController = null;
+  void _killMpv() {
+    _mpvProcess?.kill();
+    _mpvProcess = null;
   }
 
   @override
   void dispose() {
     _disposed = true;
     _cancelAllTimers();
-    _disposePlayer();
+    _killMpv();
     _socketSub?.cancel();
     _socket.dispose();
     super.dispose();
@@ -212,11 +191,18 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
       backgroundColor: Colors.black,
       body: CallbackShortcuts(
         bindings: <ShortcutActivator, VoidCallback>{
-          const SingleActivator(LogicalKeyboardKey.escape): widget.onOpenSettings,
-          const SingleActivator(LogicalKeyboardKey.keyS): widget.onOpenSettings,
-          const SingleActivator(LogicalKeyboardKey.goBack): widget.onOpenSettings,
-          const SingleActivator(LogicalKeyboardKey.select): widget.onOpenSettings,
-          const SingleActivator(LogicalKeyboardKey.contextMenu): widget.onOpenSettings,
+          const SingleActivator(LogicalKeyboardKey.escape): () {
+            _killMpv();
+            widget.onOpenSettings();
+          },
+          const SingleActivator(LogicalKeyboardKey.keyS): () {
+            _killMpv();
+            widget.onOpenSettings();
+          },
+          const SingleActivator(LogicalKeyboardKey.goBack): () {
+            _killMpv();
+            widget.onOpenSettings();
+          },
         },
         child: Focus(
           autofocus: true,
@@ -227,25 +213,28 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
                 _buildLoading()
               else if (_files.isEmpty)
                 _buildEmpty()
+              else if (_playingVideo)
+                // Black screen while mpv renders on top
+                const SizedBox.expand()
               else
                 AnimatedOpacity(
                   opacity: _fadeOpacity,
                   duration: const Duration(milliseconds: 800),
                   child: _buildSlide(),
                 ),
-              // Progress bar
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: LinearProgressIndicator(
-                  value: _progress,
-                  minHeight: 3,
-                  backgroundColor: Colors.black26,
-                  valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFEC1C24)),
+              // Progress bar (hidden during external video)
+              if (!_playingVideo)
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: LinearProgressIndicator(
+                    value: _progress,
+                    minHeight: 3,
+                    backgroundColor: Colors.black26,
+                    valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFEC1C24)),
+                  ),
                 ),
-              ),
-              // Connection indicator
               Positioned(
                 top: 8,
                 right: 8,
@@ -279,10 +268,6 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
 
   Widget _buildSlide() {
     final file = _files[_currentIndex];
-
-    if (file.isVideo && _videoController != null) {
-      return Video(controller: _videoController!, fill: Colors.black);
-    }
 
     final localPath = _cache.getCachedPath(file);
     if (localPath != null && File(localPath).existsSync()) {
