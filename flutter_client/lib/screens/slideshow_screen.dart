@@ -30,11 +30,8 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
   final CacheService _cache = CacheService();
 
   List<SlideFile> _files = [];
-  Map<String, String> _localPaths = {};
   int _currentIndex = 0;
   bool _initialLoading = true;
-  int _syncDone = 0;
-  int _syncTotal = 0;
   double _fadeOpacity = 1.0;
   int _imageDuration = 15;
 
@@ -64,13 +61,6 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
   Future<void> _refresh() async {
     try {
       final files = await _api.fetchFiles();
-      final paths = await _cache.sync(
-        files,
-        onProgress: (done, total) {
-          if (!_disposed) setState(() { _syncDone = done; _syncTotal = total; });
-        },
-      );
-
       if (_disposed) return;
 
       final indexReset =
@@ -78,15 +68,15 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
 
       setState(() {
         _files = files;
-        _localPaths = paths;
         _initialLoading = false;
         if (indexReset) _currentIndex = 0;
       });
 
+      // Start showing content immediately, cache in background
       _startCurrentSlide();
+      _cache.syncInBackground(files);
     } catch (e) {
       if (_disposed) return;
-      // If we already have cached content, keep playing
       if (_files.isNotEmpty) return;
       setState(() => _initialLoading = false);
     }
@@ -94,7 +84,6 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
 
   void _startCurrentSlide() {
     _cancelTimers();
-
     if (_files.isEmpty) return;
     final file = _files[_currentIndex];
 
@@ -115,12 +104,12 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
       if (completed) _goToNext();
     });
 
-    final localPath = _localPaths[file.name];
-    if (localPath != null && File(localPath).existsSync()) {
-      _player!.open(Media('file://$localPath'));
-    } else {
-      _player!.open(Media(file.url));
-    }
+    // Use cached file if available, otherwise stream from URL
+    final localPath = _cache.getCachedPath(file);
+    final source = (localPath != null && File(localPath).existsSync())
+        ? 'file://$localPath'
+        : file.url;
+    _player!.open(Media(source));
 
     setState(() {});
   }
@@ -172,7 +161,6 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
         bindings: <ShortcutActivator, VoidCallback>{
           const SingleActivator(LogicalKeyboardKey.escape): widget.onOpenSettings,
           const SingleActivator(LogicalKeyboardKey.keyS): widget.onOpenSettings,
-          // Android TV remote: back button and select/enter open settings
           const SingleActivator(LogicalKeyboardKey.goBack): widget.onOpenSettings,
           const SingleActivator(LogicalKeyboardKey.select): widget.onOpenSettings,
           const SingleActivator(LogicalKeyboardKey.contextMenu): widget.onOpenSettings,
@@ -192,7 +180,6 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
                   duration: const Duration(milliseconds: 800),
                   child: _buildSlide(),
                 ),
-              // Connection indicator
               Positioned(
                 top: 8,
                 right: 8,
@@ -206,22 +193,16 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
   }
 
   Widget _buildLoading() {
-    return Center(
+    return const Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const CircularProgressIndicator(color: Colors.red),
-          const SizedBox(height: 16),
-          if (_syncTotal > 0)
-            Text(
-              'Descargando $_syncDone / $_syncTotal',
-              style: const TextStyle(color: Colors.white54),
-            )
-          else
-            const Text(
-              'Cargando contenido...',
-              style: TextStyle(color: Colors.white54),
-            ),
+          CircularProgressIndicator(color: Colors.red),
+          SizedBox(height: 16),
+          Text(
+            'Cargando contenido...',
+            style: TextStyle(color: Colors.white54),
+          ),
         ],
       ),
     );
@@ -248,33 +229,35 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
       );
     }
 
-    final localPath = _localPaths[file.name];
+    // Use cached file if available, otherwise load from network
+    final localPath = _cache.getCachedPath(file);
     if (localPath != null && File(localPath).existsSync()) {
-      return Center(
-        child: Image.file(
-          File(localPath),
-          fit: BoxFit.contain,
-          width: double.infinity,
-          height: double.infinity,
-        ),
-      );
-    }
-
-    return Center(
-      child: Image.network(
-        file.url,
+      return Image.file(
+        File(localPath),
         fit: BoxFit.contain,
         width: double.infinity,
         height: double.infinity,
-        loadingBuilder: (_, child, progress) {
-          if (progress == null) return child;
-          return const CircularProgressIndicator(color: Colors.red);
-        },
-        errorBuilder: (_, error, stack) => const Icon(
-          Icons.broken_image,
-          color: Colors.white24,
-          size: 64,
-        ),
+        errorBuilder: (_, error, stack) => _buildNetworkImage(file),
+      );
+    }
+
+    return _buildNetworkImage(file);
+  }
+
+  Widget _buildNetworkImage(SlideFile file) {
+    return Image.network(
+      file.url,
+      fit: BoxFit.contain,
+      width: double.infinity,
+      height: double.infinity,
+      loadingBuilder: (_, child, progress) {
+        if (progress == null) return child;
+        return const Center(
+          child: CircularProgressIndicator(color: Colors.red),
+        );
+      },
+      errorBuilder: (_, error, stack) => const Center(
+        child: Icon(Icons.broken_image, color: Colors.white24, size: 64),
       ),
     );
   }

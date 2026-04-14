@@ -9,6 +9,7 @@ class CacheService {
   final Dio _dio = Dio();
   late Directory _cacheDir;
   bool _initialized = false;
+  final Map<String, String> _cachedPaths = {};
 
   Future<void> init() async {
     if (_initialized) return;
@@ -17,91 +18,78 @@ class CacheService {
     if (!await _cacheDir.exists()) {
       await _cacheDir.create(recursive: true);
     }
+    // Index existing cached files
+    try {
+      for (final entry in _cacheDir.listSync()) {
+        if (entry is File) {
+          _cachedPaths[entry.uri.pathSegments.last] = entry.path;
+        }
+      }
+    } catch (_) {}
     _initialized = true;
   }
 
-  String _hashUrl(String url) {
-    return md5.convert(utf8.encode(url)).toString();
+  String _cacheKey(SlideFile file) {
+    // Strip query params from URL for stable cache keys
+    final baseUrl = file.url.split('?').first;
+    final hash = md5.convert(utf8.encode(baseUrl)).toString();
+    final ext = file.type.isNotEmpty ? file.type : '.bin';
+    return '$hash$ext';
   }
 
-  String _getExtension(SlideFile file) {
-    return file.type.isNotEmpty ? file.type : '.bin';
-  }
-
-  File _localFile(SlideFile file) {
-    final hash = _hashUrl(file.url);
-    final ext = _getExtension(file);
-    return File('${_cacheDir.path}/$hash$ext');
-  }
-
-  /// Returns the local path if cached, null otherwise.
+  /// Returns local path if file is already cached.
   String? getCachedPath(SlideFile file) {
-    final f = _localFile(file);
-    return f.existsSync() ? f.path : null;
+    final key = _cacheKey(file);
+    final path = _cachedPaths[key];
+    if (path != null && File(path).existsSync()) return path;
+    return null;
   }
 
-  /// Downloads a file and returns the local path.
-  Future<String> download(
-    SlideFile file, {
-    void Function(int received, int total)? onProgress,
-  }) async {
+  /// Downloads a single file in background. Returns local path on success.
+  Future<String?> downloadInBackground(SlideFile file) async {
     await init();
-    final local = _localFile(file);
-    if (local.existsSync()) return local.path;
-
-    await _dio.download(
-      file.url,
-      local.path,
-      onReceiveProgress: onProgress,
-    );
-    return local.path;
-  }
-
-  /// Syncs the cache: downloads new files, deletes stale ones.
-  /// Returns a map of filename -> local path for all current files.
-  Future<Map<String, String>> sync(
-    List<SlideFile> files, {
-    void Function(int done, int total)? onProgress,
-  }) async {
-    await init();
-
-    final result = <String, String>{};
-    final neededHashes = <String>{};
-    int done = 0;
-
-    for (final file in files) {
-      final hash = _hashUrl(file.url);
-      final ext = _getExtension(file);
-      neededHashes.add('$hash$ext');
-
-      final local = _localFile(file);
-      if (local.existsSync()) {
-        result[file.name] = local.path;
-      } else {
-        try {
-          final path = await download(file);
-          result[file.name] = path;
-        } catch (e) {
-          // Skip files that fail to download
-        }
-      }
-      done++;
-      onProgress?.call(done, files.length);
+    final key = _cacheKey(file);
+    if (_cachedPaths.containsKey(key)) {
+      final existing = File(_cachedPaths[key]!);
+      if (existing.existsSync()) return existing.path;
     }
 
-    // Remove stale cached files
+    final localPath = '${_cacheDir.path}/$key';
     try {
-      final entries = _cacheDir.listSync();
-      for (final entry in entries) {
+      await _dio.download(file.url, localPath);
+      _cachedPaths[key] = localPath;
+      return localPath;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Starts background sync: downloads missing files, removes stale ones.
+  /// Non-blocking — returns immediately, downloads happen in background.
+  Future<void> syncInBackground(List<SlideFile> files) async {
+    await init();
+    final neededKeys = <String>{};
+
+    for (final file in files) {
+      final key = _cacheKey(file);
+      neededKeys.add(key);
+      if (!_cachedPaths.containsKey(key)) {
+        // Download in background, don't await all at once
+        downloadInBackground(file);
+      }
+    }
+
+    // Remove stale files
+    try {
+      for (final entry in _cacheDir.listSync()) {
         if (entry is File) {
           final name = entry.uri.pathSegments.last;
-          if (!neededHashes.contains(name)) {
+          if (!neededKeys.contains(name)) {
             entry.deleteSync();
+            _cachedPaths.remove(name);
           }
         }
       }
     } catch (_) {}
-
-    return result;
   }
 }
