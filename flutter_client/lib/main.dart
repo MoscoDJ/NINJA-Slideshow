@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
@@ -10,15 +11,25 @@ void main() {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
 
-  // Fullscreen immersive mode (hides status bar / nav bar on Android TV)
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
   ]);
 
-  // Keep screen awake (critical for kiosk/slideshow use)
-  WakelockPlus.enable();
+  // Keep screen awake — not available on all Linux desktops, safe to ignore
+  try {
+    WakelockPlus.enable();
+  } catch (_) {}
+
+  // For Linux (Raspberry Pi): disable screen blanking via xset
+  if (Platform.isLinux) {
+    try {
+      Process.run('xset', ['s', 'off']);
+      Process.run('xset', ['-dpms']);
+      Process.run('xset', ['s', 'noblank']);
+    } catch (_) {}
+  }
 
   runApp(const NinjaSlideshowApp());
 }
