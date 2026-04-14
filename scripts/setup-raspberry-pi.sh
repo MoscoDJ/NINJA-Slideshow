@@ -30,6 +30,7 @@ sudo apt-get update && sudo apt-get upgrade -y
 echo "[2/6] Installing minimal kiosk packages..."
 sudo apt-get install -y \
   xserver-xorg x11-xserver-utils xinit \
+  matchbox-window-manager \
   unclutter \
   --no-install-recommends
 
@@ -54,7 +55,9 @@ xset s noblank
 
 unclutter -idle 0 -root &
 
-sleep 2
+# Matchbox forces every window fullscreen — needed for kiosk without desktop
+matchbox-window-manager -use_titlebar no -use_desktop_mode no &
+sleep 1
 
 CHROMIUM=\$(command -v chromium-browser || command -v chromium)
 \$CHROMIUM \\
