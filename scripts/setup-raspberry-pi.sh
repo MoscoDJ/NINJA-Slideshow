@@ -22,7 +22,7 @@ sudo apt-get update && sudo apt-get upgrade -y
 echo "[2/7] Installing build dependencies..."
 sudo apt-get install -y \
   git curl unzip xz-utils wget \
-  clang cmake ninja-build pkg-config \
+  clang lld llvm cmake ninja-build pkg-config \
   libgtk-3-dev liblzma-dev libstdc++-12-dev \
   libmpv-dev \
   mesa-utils
