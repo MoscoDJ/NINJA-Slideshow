@@ -190,8 +190,8 @@ Incluye manejo agresivo de memoria para funcionar en browsers limitados
 
 ### Raspberry Pi (Chromium kiosk)
 
-Chromium en modo kiosk fullscreen apuntando al slideshow web.
-Hardware video decoding nativo, sin compilacion, sin dependencias de Flutter.
+Chromium en modo kiosk sobre X11 minimal (sin escritorio, matchbox-wm).
+GPU memory en 256MB para mejor rendimiento de video.
 
 ```bash
 bash scripts/setup-raspberry-pi.sh https://your-domain.com
@@ -200,7 +200,7 @@ sudo reboot
 
 ### Android TV — Haier, Sharp (Flutter APK)
 
-Misma app Flutter compilada para Android. Incluye soporte para leanback
+App Flutter compilada para Android TV. Incluye soporte para leanback
 launcher, D-pad navigation, wakelock, y fullscreen inmersivo.
 Ver [`flutter_client/README.md`](flutter_client/README.md).
 
@@ -225,14 +225,15 @@ ares-install --device lgtv com.ninja.slideshow_1.0.0_all.ipk
 
 ### Samsung (Tizen)
 
-App web nativa empaquetada como WGT. Misma logica que la version webOS,
-adaptada para Tizen APIs.
+App web nativa empaquetada como WGT. Requiere certificado Samsung
+(Tizen Studio + Samsung Developer account). Apagado remoto via
+WebSocket API (Samsung Smart TV protocol).
 Ver [`tizen_app/README.md`](tizen_app/README.md).
 
 ```bash
-cd tizen_app
-tizen package -t wgt -s <perfil> -- .
-tizen install -n NINJASlideshow.wgt -t <serial>
+tizen package -t wgt -s <perfil-samsung> -- tizen_app/
+sdb connect <TV_IP>:26101
+sdb shell "0 vd_appinstall ninjSlides /path/to/ninja.wgt"
 ```
 
 ### Resumen de plataformas
@@ -244,6 +245,39 @@ tizen install -n NINJASlideshow.wgt -t <serial>
 | Android TV | Haier, Sharp | `flutter_client/` | `flutter build apk` | APK |
 | webOS | LG | `webos_app/` | `ares-package` | IPK |
 | Tizen | Samsung | `tizen_app/` | `tizen package` | WGT |
+
+---
+
+## Automatizacion (Raspberry Pi)
+
+La Pi actua como hub de control para todas las pantallas.
+Los scripts viven en `/home/<user>/ninja-tv-deploy/` en la Pi.
+
+### Cron (Lunes a Viernes)
+
+| Hora | Accion |
+|---|---|
+| 9:00 AM | TVs se encienden (timer interno LG / IR blaster) |
+| 9:10 AM | Deploy apps en LG y Samsung |
+| 8:00 PM | Renovar sesion de Developer Mode (reinstalar) |
+| 10:50 PM | Ultima renovacion del dia |
+| 11:00 PM | Samsung se apaga via WebSocket API; LGs via timer interno |
+
+### Scripts en la Pi
+
+| Script | Funcion |
+|---|---|
+| `deploy.sh` | Reinstala app en todas las LG (ares-cli) |
+| `deploy-samsung.sh` | Reinstala app en Samsung (sdb via qemu x86) |
+| `samsung/power-off.sh` | Apaga Samsung via WebSocket API |
+| `tv-power.sh` | Enciende/apaga LGs (WOL + WebSocket) |
+| `lg-power.py` | Control de energia LG via WebSocket |
+
+### Setup
+
+- LG: `ares-cli` instalado nativamente (Node 20)
+- Samsung: `sdb` x86_64 ejecutado via `qemu-user-static` con `LD_LIBRARY_PATH`
+- Clave SSH de LG y token de Samsung se guardan automaticamente
 
 ---
 

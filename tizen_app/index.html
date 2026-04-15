@@ -215,6 +215,10 @@
       }
 
       function connectSocket() {
+        if (typeof io === "undefined") {
+          setInterval(fetchFiles, 30000);
+          return;
+        }
         try {
           socket = io(SERVER_URL, { transports: ["websocket", "polling"] });
           socket.on("connect", function () { statusDot.className = "connected"; });

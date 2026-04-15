@@ -31,7 +31,7 @@ echo "[2/6] Installing minimal kiosk packages..."
 sudo apt-get install -y \
   xserver-xorg x11-xserver-utils xinit \
   matchbox-window-manager \
-  unclutter \
+  unclutter xdotool \
   --no-install-recommends
 
 # Install chromium (package name varies by distro)
