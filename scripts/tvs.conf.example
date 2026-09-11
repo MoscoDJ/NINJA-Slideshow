@@ -12,12 +12,15 @@
 #
 # La passphrase de LG CAMBIA cada vez que se reactiva el Developer Mode.
 
-# Las LG se mueven al segmento 40 (el mismo del host de deploy) para no
+# Las LG viven en el segmento 40 (el mismo del host de deploy) para no
 # depender de ACLs. Eso ademas reactiva el Wake-on-LAN, que necesita estar en
-# la misma /24 que la pantalla. Actualizar estas IPs tras el cambio; para
-# encontrarlas: scripts/tv-discover.sh
+# la misma /24 que la pantalla. Para localizarlas: scripts/tv-discover.sh
+#
+# La passphrase CAMBIA cada vez que se reactiva el Developer Mode, y al
+# reactivarlo webOS genera una llave SSH nueva: hay que encender tambien el
+# "Key Server" para que ares-novacom pueda descargarla (TCP 9991).
 lgtv-it|lg|192.168.40.173|2c:2b:f9:d8:86:82|XXXXXX
-lgtv-diseno|lg|192.168.40.0|74:40:be:e8:a3:c2|XXXXXX
+lgtv-diseno|lg|192.168.40.174|74:40:be:e8:a3:c2|XXXXXX
 
 # La Samsung de Sala de Juntas se queda en el segmento 20 (ahi presentan los
 # jefes) y se alcanza por ACL. El WOL no le llega desde el segmento 40: usa su
