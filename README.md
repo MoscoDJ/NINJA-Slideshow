@@ -331,7 +331,7 @@ scripts/tv-deploy.sh --only lgtv-it   # una
 scripts/tv-power.sh off               # apagar todas
 ```
 
-### Cron sugerido (lunes a viernes)
+### Cron (lunes a viernes)
 
 | Hora | Accion |
 |---|---|
@@ -341,6 +341,17 @@ scripts/tv-power.sh off               # apagar todas
 | 23:00 | `tv-power.sh off` |
 
 La sesion de Developer Mode de LG expira a las ~50 h; por eso se reinstala.
+Cuando expira, webOS **borra** las apps instaladas en modo desarrollador: es
+lo que dejo la pantalla de Diseno sin app durante meses.
+
+Se instala con `crontab -e` apuntando a las rutas absolutas del repo. No hace
+falta exportar el PATH: `lib-tv.sh` resuelve por su cuenta el bin de node
+(cron arranca con un PATH minimo y sin el de nvm, asi que `ares-*` no
+existiria y cada corrida fallaria en silencio).
+
+Mientras alguna pantalla no tenga artefacto o no sea alcanzable,
+`tv-deploy.sh` termina con codigo distinto de cero. Es intencional: reportar
+exito sin haber instalado nada es justo el fallo que tenia la Pi.
 
 ### Diferencias respecto al setup de la Pi
 

@@ -27,6 +27,32 @@ fi
 
 mkdir -p "$STATE_DIR"
 
+# cron arranca con un PATH minimo (/usr/bin:/bin), sin el de nvm, asi que
+# ares-* no existiria y cada corrida fallaria en silencio. Se resuelve el bin
+# de node dinamicamente para no fijar la version en una ruta.
+ensure_tools_path() {
+  command -v ares-install >/dev/null 2>&1 && return 0
+
+  local candidate
+  for candidate in \
+    "$(command -v node 2>/dev/null | xargs -r dirname)" \
+    "$HOME/.nvm/current/bin" \
+    $(ls -d "$HOME"/.nvm/versions/node/*/bin 2>/dev/null | sort -V | tail -1) \
+    "/usr/local/bin"
+  do
+    if [ -n "$candidate" ] && [ -x "$candidate/ares-install" ]; then
+      PATH="$candidate:$PATH"
+      export PATH
+      return 0
+    fi
+  done
+
+  log "WARN: no se encontro ares-install en el PATH; las pantallas LG fallaran"
+  return 1
+}
+
+ensure_tools_path || true
+
 log() {
   printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" | tee -a "$LOG_FILE"
 }
