@@ -29,6 +29,7 @@ Browser / Flutter / TV App
 | Storage | Digital Ocean Spaces (S3-compatible) |
 | Uploads | Presigned URLs + multipart (AWS SDK v3) |
 | Auth | Password via ENV + signed cookie (stateless, multi-instance) |
+| Hardening | helmet + CSP, rate limiting, CORS por ruta |
 | Cliente Pi | Flutter Linux desktop |
 | Cliente Android TV | Flutter APK |
 | Cliente LG | webOS web app (vanilla JS) |
@@ -40,8 +41,10 @@ Browser / Flutter / TV App
 
 ```
 ├── server/                  # Backend Express
-│   ├── index.ts             # Entry point, Express setup
-│   ├── routes.ts            # API, S3, Socket.IO, CORS, auth (signed cookies)
+│   ├── index.ts             # Entry point, helmet/CSP, compression, errores
+│   ├── env.ts               # Config validada (falla al arrancar si falta algo)
+│   ├── auth.ts              # Cookies firmadas, rate limiting, comparacion segura
+│   ├── routes.ts            # API, S3, Socket.IO, CORS
 │   └── vite.ts              # Dev/prod asset serving
 ├── client/                  # Frontend React
 │   ├── public/
@@ -77,7 +80,7 @@ Browser / Flutter / TV App
 ```bash
 git clone https://github.com/MoscoDJ/NINJA-Slideshow.git
 cd NINJA-Slideshow
-npm install
+npm install          # requiere Node >= 22.12
 cp .env.example .env
 # Editar .env con tus credenciales
 npm run dev
@@ -94,11 +97,24 @@ Abre http://localhost:5000 para el slideshow y http://localhost:5000/admin para 
 | `SPACES_KEY` | Si | Access key de DO Spaces |
 | `SPACES_SECRET_KEY` | Si | Secret key de DO Spaces |
 | `BUCKET_NAME` | No | Nombre del bucket (default: `ninjacdn`) |
-| `ADMIN_PASSWORD` | Si | Password para acceder a `/admin` |
+| `SPACES_REGION` | No | Region del Space (default: `sfo3`) |
+| `SPACES_ENDPOINT` | No | Host del endpoint S3 (default: `<region>.digitaloceanspaces.com`) |
+| `SPACES_CDN_ENDPOINT` | No | Host del CDN (default: `<region>.cdn.digitaloceanspaces.com`) |
+| `ADMIN_PASSWORD` | Si | Password para `/admin`. Minimo 12 caracteres en produccion |
 | `ADMIN2_PASSWORD` | No | Password alternativo para un segundo admin |
-| `SESSION_SECRET` | Si | Secreto para firmar el token de autenticacion (HMAC-SHA256) |
+| `SESSION_SECRET` | Si en prod | Secreto HMAC-SHA256 del token. Minimo 32 caracteres |
 | `PORT` | No | Puerto del servidor (default: `5000`) |
 | `NODE_ENV` | No | `production` en deploy |
+| `TRUST_PROXY` | No | Proxies inversos delante de la app (default: `1`) |
+| `CONFIGURE_BUCKET_CORS` | No | `true` aplica la politica CORS del bucket al arrancar (default: `false`) |
+
+El servidor **valida estas variables al arrancar y falla de inmediato** si falta
+algo o si un secreto es demasiado corto: es preferible un deploy que no levanta
+a uno que levanta con autenticacion debil.
+
+En desarrollo (`NODE_ENV` != `production`) `SESSION_SECRET` es opcional: se
+genera uno aleatorio en cada arranque, lo que invalida las sesiones al
+reiniciar pero nunca es adivinable.
 
 ---
 
@@ -109,9 +125,9 @@ Abre http://localhost:5000 para el slideshow y http://localhost:5000/admin para 
 1. Crear un Space en DO (region `sfo3`)
 2. Generar credenciales en API > Spaces Keys
 
-> CORS del bucket se configura automaticamente al iniciar el servidor
-> via `PutBucketCorsCommand`. No es necesario configurarlo manualmente
-> en el panel de DO.
+> El CORS del bucket se puede aplicar desde la app arrancando **una vez** con
+> `CONFIGURE_BUCKET_CORS=true`. No lo dejes activado: seria una escritura de
+> configuracion del bucket en cada arranque y en cada instancia.
 
 ### 2. App Platform
 
@@ -119,7 +135,7 @@ Abre http://localhost:5000 para el slideshow y http://localhost:5000/admin para 
 2. Environment: **Node.js**
 3. Build command: `npm run build`
 4. Run command: `npm start`
-5. Port: `3000`
+5. Port: `5000` (o el valor de `PORT`)
 6. Agregar todas las variables de entorno de la tabla anterior
 7. Deploy
 
@@ -141,6 +157,35 @@ multiples instancias de DO App Platform y sobrevive restarts/deploys.
 - `ADMIN_PASSWORD` y opcionalmente `ADMIN2_PASSWORD` permiten dos accesos con distintas contraseñas
 - `GET /api/files` y Socket.IO son publicos (los necesitan el slideshow, Flutter y las TVs)
 - Todo lo demas (`upload`, `delete`, `order`) requiere token valido
+
+---
+
+## Seguridad
+
+| Medida | Detalle |
+|---|---|
+| Secretos obligatorios | Sin `SESSION_SECRET` en produccion el server no arranca. No hay fallback de desarrollo que permita firmar cookies de admin |
+| Comparaciones en tiempo constante | Password y firma del token se comparan por hash de longitud fija, sin filtrar informacion por timing |
+| Rate limiting | 10 intentos de login por IP cada 15 min; 300 req/min en las rutas de escritura |
+| Cookie | `HttpOnly`, `SameSite=Lax` y `Secure` en produccion |
+| CORS por ruta | `*` sin credenciales solo en las rutas publicas de lectura (lo que necesitan las TVs). Las rutas de admin son same-origin: ninguna web externa puede invocarlas con la cookie del admin |
+| CSP | `helmet` con Content-Security-Policy estricta en produccion (desactivada en dev para el HMR de Vite) |
+| Validacion de nombres | Los `filename`/`key` del cliente se normalizan y se validan contra una allowlist, con extension permitida obligatoria. No se puede escribir ni borrar fuera de `slideshow/` |
+| Limite de subida | 2 GB declarados y verificados antes de firmar la URL |
+| Errores | El cliente recibe mensajes genericos; el stack trace queda en los logs del servidor |
+| `trust proxy` acotado | Numero exacto de proxies, para que no se pueda falsear `X-Forwarded-For` y esquivar el rate limit |
+
+Las apps de TV cargan el cliente de Socket.IO desde el propio servidor
+(`/socket.io/socket.io.js`) en lugar de un CDN externo: menos superficie de
+supply chain en pantallas que quedan encendidas sin supervision, y la version
+siempre casa con la del backend.
+
+Auditoria de dependencias:
+
+```bash
+npm audit            # 0 vulnerabilidades
+npm run check        # typecheck
+```
 
 ---
 
@@ -285,7 +330,7 @@ Los scripts viven en `/home/<user>/ninja-tv-deploy/` en la Pi.
 
 | Metodo | Ruta | Auth | Descripcion |
 |---|---|---|---|
-| `GET` | `/api/files` | No | Lista archivos ordenados |
+| `GET` | `/api/files` | No | Lista archivos ordenados (CORS publico, `ETag`) |
 | `POST` | `/api/upload/presign` | Si | Presigned URL para upload simple |
 | `POST` | `/api/upload/confirm` | Si | Confirma upload, notifica clientes |
 | `POST` | `/api/upload/init-multipart` | Si | Inicia multipart upload |
@@ -294,7 +339,7 @@ Los scripts viven en `/home/<user>/ninja-tv-deploy/` en la Pi.
 | `POST` | `/api/upload/abort` | Si | Aborta multipart upload |
 | `DELETE` | `/api/files/:filename` | Si | Elimina un archivo |
 | `POST` | `/api/order` | Si | Actualiza el orden |
-| `POST` | `/api/login` | No | Login con password |
+| `POST` | `/api/login` | No | Login con password (10 intentos / 15 min / IP) |
 | `POST` | `/api/logout` | No | Cerrar sesion |
 | `GET` | `/api/auth/status` | No | Verifica si hay sesion activa |
 

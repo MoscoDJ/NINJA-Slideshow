@@ -1,23 +1,27 @@
 {
-  "include": ["client/src/**/*", "db/**/*", "server/**/*"],
-  "exclude": ["node_modules", "build", "dist", "**/*.test.ts"],
+  "include": ["client/src/**/*", "server/**/*", "vite.config.ts", "tailwind.config.ts"],
+  "exclude": ["node_modules", "dist", "build"],
   "compilerOptions": {
     "incremental": true,
-    "tsBuildInfoFile": "./node_modules/typescript/tsbuildinfo",
+    "tsBuildInfoFile": "./node_modules/.cache/tsbuildinfo",
     "noEmit": true,
+    "target": "ES2022",
     "module": "ESNext",
-    "strict": true,
-    "lib": ["esnext", "dom", "dom.iterable"],
+    "moduleResolution": "bundler",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "jsx": "preserve",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
-    "moduleResolution": "bundler",
-    "baseUrl": ".",
+    "verbatimModuleSyntax": false,
     "types": ["node", "vite/client"],
     "paths": {
-      "@/*": ["./client/src/*"],
-      "@db/*": ["./db/*"]
+      "@/*": ["./client/src/*"]
     }
   }
 }

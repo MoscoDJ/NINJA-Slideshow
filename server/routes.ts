@@ -1,10 +1,9 @@
-import type { Express, Request, Response, NextFunction } from "express";
+import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { Server as SocketServer } from "socket.io";
 import {
   S3Client,
-  ListBucketsCommand,
-  ListObjectsCommand,
+  ListObjectsV2Command,
   GetObjectCommand,
   PutObjectCommand,
   DeleteObjectCommand,
@@ -17,91 +16,149 @@ import {
   PutBucketCorsCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import path from "path";
-import crypto from "crypto";
 import cors from "cors";
+import crypto from "crypto";
+import path from "path";
+import { config, cdnBaseUrl } from "./env";
+import {
+  adminLimiter,
+  clearSession,
+  isAuthenticated,
+  isValidAdminPassword,
+  issueSession,
+  loginLimiter,
+  requireAdmin,
+} from "./auth";
+import { log } from "./vite";
 
-const AUTH_SECRET = process.env.SESSION_SECRET || "ninja-slideshow-dev-secret";
-const AUTH_COOKIE = "ninja_auth";
-const AUTH_MAX_AGE = 24 * 60 * 60 * 1000;
-
-function signToken(payload: string): string {
-  const sig = crypto.createHmac("sha256", AUTH_SECRET).update(payload).digest("hex");
-  return payload + "." + sig;
-}
-
-function verifyToken(token: string): boolean {
-  const dot = token.lastIndexOf(".");
-  if (dot === -1) return false;
-  const payload = token.substring(0, dot);
-  const sig = token.substring(dot + 1);
-  const expected = crypto.createHmac("sha256", AUTH_SECRET).update(payload).digest("hex");
-  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return false;
-  const expiry = parseInt(payload.split(":")[1], 10);
-  return Date.now() < expiry;
-}
-
-function getCookie(req: Request, name: string): string | undefined {
-  const header = req.headers.cookie;
-  if (!header) return undefined;
-  for (const part of header.split(";")) {
-    const [k, ...v] = part.trim().split("=");
-    if (k === name) return decodeURIComponent(v.join("="));
-  }
-  return undefined;
-}
-
-function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  const token = getCookie(req, AUTH_COOKIE);
-  if (token && verifyToken(token)) {
-    return next();
-  }
-  res.status(401).json({ error: "No autorizado" });
-}
-
-const BUCKET_NAME = process.env.BUCKET_NAME || "ninjacdn";
-const FOLDER_NAME = "slideshow";
-const SPACES_REGION = "sfo3";
-const SPACES_HOST = `${SPACES_REGION}.digitaloceanspaces.com`;
-const CDN_HOST =
-  process.env.SPACES_CDN_ENDPOINT ||
-  `${SPACES_REGION}.cdn.digitaloceanspaces.com`;
-
-if (!process.env.SPACES_KEY || !process.env.SPACES_SECRET_KEY) {
-  console.error("ERROR: Missing Digital Ocean Spaces credentials");
-  throw new Error("Missing Digital Ocean Spaces credentials");
-}
+const { bucket, folder } = config.spaces;
+const ORDER_KEY = `${folder}/order.json`;
 
 const s3 = new S3Client({
-  endpoint: `https://${SPACES_HOST}`,
-  region: SPACES_REGION,
+  endpoint: config.spaces.endpoint,
+  region: config.spaces.region,
   credentials: {
-    accessKeyId: process.env.SPACES_KEY,
-    secretAccessKey: process.env.SPACES_SECRET_KEY,
+    accessKeyId: config.spaces.key,
+    secretAccessKey: config.spaces.secret,
   },
   forcePathStyle: true,
 });
 
-console.log("S3 configuration:", {
-  endpoint: `https://${SPACES_HOST}`,
-  region: SPACES_REGION,
-  bucket: BUCKET_NAME,
-});
+const ALLOWED_MIME_TYPES: Record<string, string> = {
+  "image/jpeg": ".jpg",
+  "image/png": ".png",
+  "image/gif": ".gif",
+  "image/webp": ".webp",
+  "video/mp4": ".mp4",
+  "video/webm": ".webm",
+};
 
-const ALLOWED_MIME_TYPES = [
-  "image/jpeg",
-  "image/png",
-  "image/gif",
-  "image/webp",
-  "video/mp4",
-  "video/webm",
-];
+const ALLOWED_EXTENSIONS = new Set([
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".gif",
+  ".webp",
+  ".mp4",
+  ".webm",
+]);
 
-async function configureBucketCors() {
+/** Nombres seguros: sin separadores de ruta, sin `..`, sin caracteres raros. */
+const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._()-]{0,199}$/;
+
+class HttpError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Valida un nombre de archivo recibido del cliente y devuelve la clave S3.
+ * Sin esto, un `filename` como `../otra-carpeta/x.jpg` deja escribir o borrar
+ * objetos fuera de la carpeta del slideshow.
+ */
+function toObjectKey(filename: unknown): string {
+  if (typeof filename !== "string") {
+    throw new HttpError(400, "Nombre de archivo invalido");
+  }
+  // basename descarta cualquier ruta; la regex rechaza lo que quede raro.
+  const name = path.basename(filename.trim());
+  if (name !== filename.trim() || !SAFE_NAME.test(name) || name.includes("..")) {
+    throw new HttpError(400, "Nombre de archivo invalido");
+  }
+  if (!ALLOWED_EXTENSIONS.has(path.extname(name).toLowerCase())) {
+    throw new HttpError(400, "Extension de archivo no permitida");
+  }
+  return `${folder}/${name}`;
+}
+
+/** Acepta solo claves que ya viven dentro de la carpeta del slideshow. */
+function validateObjectKey(key: unknown): string {
+  if (typeof key !== "string" || !key.startsWith(`${folder}/`)) {
+    throw new HttpError(400, "Clave de objeto invalida");
+  }
+  return toObjectKey(key.slice(folder.length + 1));
+}
+
+function validateContentType(contentType: unknown): string {
+  if (typeof contentType !== "string" || !(contentType in ALLOWED_MIME_TYPES)) {
+    throw new HttpError(
+      400,
+      `Tipo no permitido. Permitidos: ${Object.keys(ALLOWED_MIME_TYPES).join(", ")}`,
+    );
+  }
+  return contentType;
+}
+
+function validateUploadSize(size: unknown): void {
+  if (size === undefined) return;
+  const bytes = Number(size);
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    throw new HttpError(400, "Tamano de archivo invalido");
+  }
+  if (bytes > config.maxUploadBytes) {
+    throw new HttpError(
+      413,
+      `El archivo excede el limite de ${config.maxUploadBytes / 1024 ** 3} GB`,
+    );
+  }
+}
+
+/**
+ * Envuelve un handler async: responde con el mensaje de HttpError cuando el
+ * error es nuestro, y con un texto genérico cuando no, para no filtrar
+ * detalles internos de S3 al cliente.
+ */
+function handler(
+  fn: (req: Request, res: Response) => Promise<void>,
+): (req: Request, res: Response) => void {
+  return (req, res) => {
+    fn(req, res).catch((error: unknown) => {
+      if (error instanceof HttpError) {
+        res.status(error.status).json({ error: error.message });
+        return;
+      }
+      log(
+        `${req.method} ${req.path} fallo: ${
+          error instanceof Error ? error.stack ?? error.message : String(error)
+        }`,
+        "error",
+      );
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Error interno del servidor" });
+      }
+    });
+  };
+}
+
+async function configureBucketCors(): Promise<void> {
   try {
     await s3.send(
       new PutBucketCorsCommand({
-        Bucket: BUCKET_NAME,
+        Bucket: bucket,
         CORSConfiguration: {
           CORSRules: [
             {
@@ -115,363 +172,379 @@ async function configureBucketCors() {
         },
       }),
     );
-    console.log("Bucket CORS configured successfully");
-  } catch (err: any) {
-    console.warn("Could not set bucket CORS (may require manual config):", err.message);
+    log("CORS del bucket configurado", "spaces");
+  } catch (error) {
+    log(
+      `No se pudo configurar el CORS del bucket: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      "spaces",
+    );
   }
 }
-
-configureBucketCors();
 
 export function registerRoutes(app: Express): Server {
   const httpServer = createServer(app);
 
-  const corsOptions = {
-    origin: true,
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    allowedHeaders: ["Content-Type"],
-    credentials: true,
-  };
+  /**
+   * Las apps de TV (Tizen/webOS) son paquetes locales: hacen peticiones
+   * cross-origin con `Origin: null`. Solo necesitan LEER, asi que abrimos el
+   * CORS unicamente en las rutas publicas y sin credenciales. Las rutas de
+   * admin quedan same-origin: con `origin: true` + `credentials: true` (la
+   * configuracion anterior) cualquier web podia invocarlas con la cookie del
+   * admin.
+   */
+  const publicCors = cors({
+    origin: "*",
+    methods: ["GET", "HEAD"],
+    credentials: false,
+    maxAge: 3600,
+  });
 
-  app.use(cors(corsOptions));
-
-  const io = new SocketServer(httpServer, { cors: corsOptions });
+  const io = new SocketServer(httpServer, {
+    cors: { origin: "*", methods: ["GET", "POST"], credentials: false },
+  });
 
   io.on("connection", (socket) => {
-    console.log("Client connected");
-    socket.on("disconnect", () => console.log("Client disconnected"));
+    log(`pantalla conectada (${io.engine.clientsCount} en total)`, "socket");
+    socket.on("disconnect", () => {
+      log(`pantalla desconectada (${io.engine.clientsCount} restantes)`, "socket");
+    });
   });
 
-  // --- Auth ---
+  if (config.configureBucketCors) {
+    void configureBucketCors();
+  }
 
-  app.post("/api/login", (req, res) => {
-    const { password } = req.body;
-    const passwords = [
-      process.env.ADMIN_PASSWORD,
-      process.env.ADMIN2_PASSWORD,
-    ].filter(Boolean);
+  // --- Autenticacion ---
 
-    if (passwords.length === 0) {
-      console.error("No ADMIN_PASSWORD environment variables are set");
-      return res
-        .status(500)
-        .json({ error: "Configuración de autenticación incompleta" });
-    }
+  app.post(
+    "/api/login",
+    loginLimiter,
+    handler(async (req, res) => {
+      const { password } = (req.body ?? {}) as { password?: unknown };
 
-    if (passwords.includes(password)) {
-      const expiry = Date.now() + AUTH_MAX_AGE;
-      const token = signToken(`admin:${expiry}`);
-      res.cookie(AUTH_COOKIE, token, {
-        httpOnly: true,
-        maxAge: AUTH_MAX_AGE,
-        sameSite: "lax",
-        path: "/",
-      });
-      return res.json({ message: "Login exitoso" });
-    }
+      if (!isValidAdminPassword(password)) {
+        log(`login fallido desde ${req.ip}`, "auth");
+        res.status(401).json({ error: "Contrasena incorrecta" });
+        return;
+      }
 
-    res.status(401).json({ error: "Contraseña incorrecta" });
-  });
+      issueSession(res);
+      res.json({ message: "Login exitoso" });
+    }),
+  );
 
   app.post("/api/logout", (_req, res) => {
-    res.clearCookie(AUTH_COOKIE, { path: "/" });
-    res.json({ message: "Sesión cerrada" });
+    clearSession(res);
+    res.json({ message: "Sesion cerrada" });
   });
 
   app.get("/api/auth/status", (req, res) => {
-    const token = getCookie(req, AUTH_COOKIE);
-    res.json({ authenticated: !!(token && verifyToken(token)) });
+    res.json({ authenticated: isAuthenticated(req) });
   });
 
-  // --- Files listing ---
+  // --- Listado publico ---
 
-  app.get("/api/files", async (req, res) => {
-    try {
-      const bucketsResp = await s3.send(new ListBucketsCommand({}));
-      if (!bucketsResp.Buckets?.some((b) => b.Name === BUCKET_NAME)) {
-        return res.status(404).json({ error: "Bucket not found" });
-      }
-
-      const data = await s3.send(
-        new ListObjectsCommand({
-          Bucket: BUCKET_NAME,
-          Prefix: FOLDER_NAME + "/",
-        }),
+  app.options("/api/files", publicCors);
+  app.get(
+    "/api/files",
+    publicCors,
+    handler(async (req, res) => {
+      const listing = await s3.send(
+        new ListObjectsV2Command({ Bucket: bucket, Prefix: `${folder}/` }),
       );
 
-      let files =
-        data.Contents?.filter(
+      const files = (listing.Contents ?? [])
+        .filter(
           (item) =>
+            item.Key &&
             item.Size &&
             item.Size > 0 &&
-            item.Key !== `${FOLDER_NAME}/` &&
-            !item.Key?.endsWith("order.json"),
-        ).map((item) => {
-          const ts = item.LastModified
+            item.Key !== `${folder}/` &&
+            item.Key !== ORDER_KEY,
+        )
+        .map((item) => {
+          const version = item.LastModified
             ? Math.floor(item.LastModified.getTime() / 1000)
             : 0;
           return {
             name: path.basename(item.Key!),
-            url: `https://${BUCKET_NAME}.${CDN_HOST}/${item.Key}?v=${ts}`,
+            url: `${cdnBaseUrl}/${item.Key}?v=${version}`,
             type: path.extname(item.Key!).toLowerCase(),
             lastModified: item.LastModified?.toISOString(),
           };
-        }) || [];
+        });
 
-      try {
-        const orderResp = await s3.send(
-          new GetObjectCommand({
-            Bucket: BUCKET_NAME,
-            Key: `${FOLDER_NAME}/order.json`,
-          }),
-        );
-        const bodyStr = await orderResp.Body?.transformToString();
-        if (bodyStr) {
-          const savedOrder: string[] = JSON.parse(bodyStr).order;
-          files.sort((a, b) => {
-            const aIdx = savedOrder.indexOf(a.name);
-            const bIdx = savedOrder.indexOf(b.name);
-            if (aIdx === -1) return 1;
-            if (bIdx === -1) return -1;
-            return aIdx - bIdx;
-          });
-        }
-      } catch {
+      const savedOrder = await readOrder();
+      if (savedOrder) {
+        const rank = new Map(savedOrder.map((name, index) => [name, index]));
+        files.sort((a, b) => {
+          const aRank = rank.get(a.name) ?? Number.MAX_SAFE_INTEGER;
+          const bRank = rank.get(b.name) ?? Number.MAX_SAFE_INTEGER;
+          return aRank - bRank || a.name.localeCompare(b.name);
+        });
+      } else {
         files.sort((a, b) => a.name.localeCompare(b.name));
       }
 
       const body = JSON.stringify(files);
-      const etag = `"${crypto.createHash("md5").update(body).digest("hex")}"`;
+      const etag = `"${crypto.createHash("sha256").update(body).digest("hex")}"`;
 
       res.set("Cache-Control", "no-cache");
       res.set("ETag", etag);
 
       if (req.headers["if-none-match"] === etag) {
-        return res.status(304).end();
+        res.status(304).end();
+        return;
       }
 
-      res.json(files);
-    } catch (error: any) {
-      console.error("Error listing files:", error);
-      res.status(500).json({ error: error.message });
-    }
-  });
+      res.type("application/json").send(body);
+    }),
+  );
 
-  // --- Presigned upload (simple, < 100 MB) ---
-
-  app.post("/api/upload/presign", requireAdmin, async (req, res) => {
+  async function readOrder(): Promise<string[] | null> {
     try {
-      const { filename, contentType } = req.body;
-      if (!filename || !contentType) {
-        return res
-          .status(400)
-          .json({ error: "filename and contentType are required" });
-      }
-      if (!ALLOWED_MIME_TYPES.includes(contentType)) {
-        return res.status(400).json({
-          error: `Tipo no permitido. Permitidos: ${ALLOWED_MIME_TYPES.join(", ")}`,
-        });
-      }
+      const response = await s3.send(
+        new GetObjectCommand({ Bucket: bucket, Key: ORDER_KEY }),
+      );
+      const raw = await response.Body?.transformToString();
+      if (!raw) return null;
 
-      const key = `${FOLDER_NAME}/${filename}`;
-      const command = new PutObjectCommand({
-        Bucket: BUCKET_NAME,
-        Key: key,
-        ContentType: contentType,
-      });
+      const parsed: unknown = JSON.parse(raw);
+      const order = (parsed as { order?: unknown }).order;
+      return Array.isArray(order)
+        ? order.filter((name): name is string => typeof name === "string")
+        : null;
+    } catch {
+      return null;
+    }
+  }
 
-      const url = await getSignedUrl(s3, command, { expiresIn: 3600 });
+  // --- Subida simple con URL prefirmada (< 100 MB) ---
+
+  app.post(
+    "/api/upload/presign",
+    adminLimiter,
+    requireAdmin,
+    handler(async (req, res) => {
+      const { filename, contentType, size } = (req.body ?? {}) as Record<
+        string,
+        unknown
+      >;
+      validateUploadSize(size);
+      const key = toObjectKey(filename);
+      const type = validateContentType(contentType);
+
+      const url = await getSignedUrl(
+        s3,
+        new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: type }),
+        { expiresIn: 3600 },
+      );
+
       res.json({ url, key });
-    } catch (error: any) {
-      console.error("Error generating presigned URL:", error);
-      res.status(500).json({ error: error.message });
-    }
-  });
+    }),
+  );
 
-  // Confirm upload — sets ACL to public-read and notifies clients
-  app.post("/api/upload/confirm", requireAdmin, async (req, res) => {
-    try {
-      const { key } = req.body;
-      if (key) {
-        await s3.send(
-          new PutObjectAclCommand({
-            Bucket: BUCKET_NAME,
-            Key: key,
-            ACL: "public-read",
-          }),
-        );
-      }
-      io.emit("filesUpdated");
-      res.json({ message: "Upload confirmed" });
-    } catch (error: any) {
-      console.error("Error confirming upload:", error);
-      res.status(500).json({ error: error.message });
-    }
-  });
+  app.post(
+    "/api/upload/confirm",
+    adminLimiter,
+    requireAdmin,
+    handler(async (req, res) => {
+      const key = validateObjectKey((req.body ?? {}).key);
 
-  // --- Multipart upload (>= 100 MB) ---
-
-  app.post("/api/upload/init-multipart", requireAdmin, async (req, res) => {
-    try {
-      const { filename, contentType } = req.body;
-      if (!filename || !contentType) {
-        return res
-          .status(400)
-          .json({ error: "filename and contentType are required" });
-      }
-      if (!ALLOWED_MIME_TYPES.includes(contentType)) {
-        return res.status(400).json({
-          error: `Tipo no permitido. Permitidos: ${ALLOWED_MIME_TYPES.join(", ")}`,
-        });
-      }
-
-      const key = `${FOLDER_NAME}/${filename}`;
-      const resp = await s3.send(
-        new CreateMultipartUploadCommand({
-          Bucket: BUCKET_NAME,
+      await s3.send(
+        new PutObjectAclCommand({
+          Bucket: bucket,
           Key: key,
-          ContentType: contentType,
           ACL: "public-read",
         }),
       );
 
-      res.json({ uploadId: resp.UploadId, key });
-    } catch (error: any) {
-      console.error("Error initiating multipart upload:", error);
-      res.status(500).json({ error: error.message });
-    }
-  });
+      io.emit("filesUpdated");
+      res.json({ message: "Upload confirmado" });
+    }),
+  );
 
-  app.post("/api/upload/presign-part", requireAdmin, async (req, res) => {
-    try {
-      const { key, uploadId, partNumber } = req.body;
-      if (!key || !uploadId || !partNumber) {
-        return res
-          .status(400)
-          .json({ error: "key, uploadId, and partNumber are required" });
+  // --- Subida multiparte (>= 100 MB) ---
+
+  app.post(
+    "/api/upload/init-multipart",
+    adminLimiter,
+    requireAdmin,
+    handler(async (req, res) => {
+      const { filename, contentType, size } = (req.body ?? {}) as Record<
+        string,
+        unknown
+      >;
+      validateUploadSize(size);
+      const key = toObjectKey(filename);
+      const type = validateContentType(contentType);
+
+      const response = await s3.send(
+        new CreateMultipartUploadCommand({
+          Bucket: bucket,
+          Key: key,
+          ContentType: type,
+          ACL: "public-read",
+        }),
+      );
+
+      res.json({ uploadId: response.UploadId, key });
+    }),
+  );
+
+  app.post(
+    "/api/upload/presign-part",
+    adminLimiter,
+    requireAdmin,
+    handler(async (req, res) => {
+      const { key, uploadId, partNumber } = (req.body ?? {}) as Record<
+        string,
+        unknown
+      >;
+      const objectKey = validateObjectKey(key);
+
+      if (typeof uploadId !== "string" || !uploadId) {
+        throw new HttpError(400, "uploadId requerido");
+      }
+      const part = Number(partNumber);
+      if (!Number.isInteger(part) || part < 1 || part > 10_000) {
+        throw new HttpError(400, "partNumber invalido");
       }
 
-      const command = new UploadPartCommand({
-        Bucket: BUCKET_NAME,
-        Key: key,
-        UploadId: uploadId,
-        PartNumber: partNumber,
-      });
+      const url = await getSignedUrl(
+        s3,
+        new UploadPartCommand({
+          Bucket: bucket,
+          Key: objectKey,
+          UploadId: uploadId,
+          PartNumber: part,
+        }),
+        { expiresIn: 3600 },
+      );
 
-      const url = await getSignedUrl(s3, command, { expiresIn: 3600 });
       res.json({ url });
-    } catch (error: any) {
-      console.error("Error generating part presigned URL:", error);
-      res.status(500).json({ error: error.message });
-    }
-  });
+    }),
+  );
 
-  app.post("/api/upload/complete", requireAdmin, async (req, res) => {
-    try {
-      const { key, uploadId, parts } = req.body;
-      if (!key || !uploadId || !Array.isArray(parts)) {
-        return res
-          .status(400)
-          .json({ error: "key, uploadId, and parts are required" });
+  app.post(
+    "/api/upload/complete",
+    adminLimiter,
+    requireAdmin,
+    handler(async (req, res) => {
+      const { key, uploadId, parts } = (req.body ?? {}) as Record<
+        string,
+        unknown
+      >;
+      const objectKey = validateObjectKey(key);
+
+      if (typeof uploadId !== "string" || !uploadId) {
+        throw new HttpError(400, "uploadId requerido");
+      }
+      if (!Array.isArray(parts) || parts.length === 0) {
+        throw new HttpError(400, "parts requerido");
       }
 
       await s3.send(
         new CompleteMultipartUploadCommand({
-          Bucket: BUCKET_NAME,
-          Key: key,
+          Bucket: bucket,
+          Key: objectKey,
           UploadId: uploadId,
           MultipartUpload: {
-            Parts: parts.map(
-              (p: { partNumber: number; etag: string }) => ({
-                PartNumber: p.partNumber,
-                ETag: p.etag,
-              }),
-            ),
+            Parts: parts.map((entry: { partNumber: number; etag: string }) => ({
+              PartNumber: entry.partNumber,
+              ETag: entry.etag,
+            })),
           },
         }),
       );
 
       io.emit("filesUpdated");
-      res.json({ message: "Upload completed" });
-    } catch (error: any) {
-      console.error("Error completing multipart upload:", error);
-      res.status(500).json({ error: error.message });
-    }
-  });
+      res.json({ message: "Upload completado" });
+    }),
+  );
 
-  app.post("/api/upload/abort", requireAdmin, async (req, res) => {
-    try {
-      const { key, uploadId } = req.body;
-      if (!key || !uploadId) {
-        return res
-          .status(400)
-          .json({ error: "key and uploadId are required" });
+  app.post(
+    "/api/upload/abort",
+    adminLimiter,
+    requireAdmin,
+    handler(async (req, res) => {
+      const { key, uploadId } = (req.body ?? {}) as Record<string, unknown>;
+      const objectKey = validateObjectKey(key);
+
+      if (typeof uploadId !== "string" || !uploadId) {
+        throw new HttpError(400, "uploadId requerido");
       }
 
       await s3.send(
         new AbortMultipartUploadCommand({
-          Bucket: BUCKET_NAME,
-          Key: key,
+          Bucket: bucket,
+          Key: objectKey,
           UploadId: uploadId,
         }),
       );
 
-      res.json({ message: "Upload aborted" });
-    } catch (error: any) {
-      console.error("Error aborting multipart upload:", error);
-      res.status(500).json({ error: error.message });
-    }
-  });
+      res.json({ message: "Upload abortado" });
+    }),
+  );
 
-  // --- Delete file ---
+  // --- Borrado ---
 
-  app.delete("/api/files/:filename", requireAdmin, async (req, res) => {
-    try {
-      const key = `${FOLDER_NAME}/${req.params.filename}`;
+  app.delete(
+    "/api/files/:filename",
+    adminLimiter,
+    requireAdmin,
+    handler(async (req, res) => {
+      const key = toObjectKey(req.params.filename);
 
       try {
-        await s3.send(
-          new HeadObjectCommand({ Bucket: BUCKET_NAME, Key: key }),
-        );
+        await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
       } catch {
-        return res.status(404).json({ error: "Archivo no encontrado" });
+        throw new HttpError(404, "Archivo no encontrado");
       }
 
-      await s3.send(
-        new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: key }),
-      );
+      await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
       io.emit("filesUpdated");
       res.json({ message: "Archivo eliminado exitosamente" });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  });
+    }),
+  );
 
-  // --- Update order ---
+  // --- Orden del slideshow ---
 
-  app.post("/api/order", requireAdmin, async (req, res) => {
-    try {
-      const { order } = req.body;
-      if (!Array.isArray(order)) {
-        throw new Error("Formato de orden inválido");
+  app.post(
+    "/api/order",
+    adminLimiter,
+    requireAdmin,
+    handler(async (req, res) => {
+      const { order } = (req.body ?? {}) as { order?: unknown };
+      if (
+        !Array.isArray(order) ||
+        !order.every((name): name is string => typeof name === "string")
+      ) {
+        throw new HttpError(400, "Formato de orden invalido");
+      }
+      if (new Set(order).size !== order.length) {
+        throw new HttpError(400, "El orden tiene nombres repetidos");
       }
 
       const listing = await s3.send(
-        new ListObjectsCommand({
-          Bucket: BUCKET_NAME,
-          Prefix: FOLDER_NAME + "/",
-        }),
+        new ListObjectsV2Command({ Bucket: bucket, Prefix: `${folder}/` }),
       );
-      const existingNames =
-        listing.Contents?.map((item) => path.basename(item.Key!)) || [];
-      if (!order.every((f: string) => existingNames.includes(f))) {
-        throw new Error("Algunos archivos en el orden no existen");
+      const existing = new Set(
+        (listing.Contents ?? [])
+          .filter((item) => item.Key && item.Key !== ORDER_KEY)
+          .map((item) => path.basename(item.Key!)),
+      );
+
+      if (!order.every((name) => existing.has(name))) {
+        throw new HttpError(400, "Algunos archivos en el orden no existen");
       }
 
       await s3.send(
         new PutObjectCommand({
-          Bucket: BUCKET_NAME,
-          Key: `${FOLDER_NAME}/order.json`,
+          Bucket: bucket,
+          Key: ORDER_KEY,
           Body: JSON.stringify(
             { order, updatedAt: new Date().toISOString() },
             null,
@@ -484,10 +557,13 @@ export function registerRoutes(app: Express): Server {
 
       io.emit("filesUpdated");
       res.json({ message: "Orden actualizado exitosamente", order });
-    } catch (error: any) {
-      console.error("Error updating order:", error);
-      res.status(500).json({ error: error.message });
-    }
+    }),
+  );
+
+  // Cualquier otra ruta /api no existe: responder JSON en lugar de caer en el
+  // catch-all del SPA y devolver index.html con status 200.
+  app.use("/api", (_req, res) => {
+    res.status(404).json({ error: "Endpoint no encontrado" });
   });
 
   return httpServer;

@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>NINJA Slideshow</title>
   <script src="webOSjs-0.1.0/webOS.js"></script>
-  <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body {
@@ -215,15 +214,39 @@
         xhr.send();
       }
 
+      // El cliente de socket.io se sirve desde el propio servidor
+      // (/socket.io/socket.io.js). Antes venia de cdn.socket.io sin
+      // subresource integrity: un CDN externo sin verificar, ejecutando codigo
+      // en pantallas que quedan encendidas sin supervision durante semanas.
+      // Servirlo nosotros tambien garantiza que la version case con el server.
+      function loadSocketIo(onDone) {
+        var script = document.createElement("script");
+        script.src = SERVER_URL + "/socket.io/socket.io.js";
+        script.async = true;
+        script.onload = function () { onDone(true); };
+        script.onerror = function () { onDone(false); };
+        document.head.appendChild(script);
+      }
+
+      function pollOnly() {
+        setInterval(fetchFiles, 30000);
+      }
+
       function connectSocket() {
-        try {
-          socket = io(SERVER_URL, { transports: ["websocket", "polling"] });
-          socket.on("connect", function () { statusDot.className = "connected"; });
-          socket.on("disconnect", function () { statusDot.className = ""; });
-          socket.on("filesUpdated", function () { fetchFiles(); });
-        } catch (e) {
-          setInterval(fetchFiles, 30000);
-        }
+        loadSocketIo(function (loaded) {
+          if (!loaded || typeof io === "undefined") {
+            pollOnly();
+            return;
+          }
+          try {
+            socket = io(SERVER_URL, { transports: ["websocket", "polling"] });
+            socket.on("connect", function () { statusDot.className = "connected"; });
+            socket.on("disconnect", function () { statusDot.className = ""; });
+            socket.on("filesUpdated", function () { fetchFiles(); });
+          } catch (e) {
+            pollOnly();
+          }
+        });
       }
 
       if (window.webOS && window.webOS.service) {

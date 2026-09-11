@@ -1,27 +1,28 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import themePlugin from "@replit/vite-plugin-shadcn-theme-json";
 import path, { dirname } from "path";
-import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 import { fileURLToPath } from "url";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
 export default defineConfig({
-  plugins: [
-    react(),
-    runtimeErrorOverlay(),
-    themePlugin(),
-  ],
+  plugins: [react()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "client", "src"),
-      "@db": path.resolve(__dirname, "db"),
     },
   },
   root: path.resolve(__dirname, "client"),
   build: {
     outDir: path.resolve(__dirname, "dist/public"),
     emptyOutDir: true,
+    /**
+     * Las pantallas corren Chromium antiguo empotrado (Tizen 5.0 ~ Chrome 63,
+     * webOS 4 ~ Chrome 53, Android TV viejo). El target por defecto de Vite 7
+     * asume navegadores modernos y emite sintaxis que esas TVs no parsean.
+     */
+    target: ["chrome61", "safari11"],
+    cssTarget: ["chrome61", "safari11"],
+    sourcemap: false,
   },
 });

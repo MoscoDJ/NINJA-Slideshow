@@ -95,6 +95,12 @@ export default function Slideshow() {
     }, FADE_DURATION);
   }, [files.length, stopProgressBar]);
 
+  // Un unmount a mitad de la transicion dejaria `advancing` en true para
+  // siempre, bloqueando todos los avances posteriores.
+  useEffect(() => {
+    return () => { advancing.current = false; };
+  }, []);
+
   // Attach video handlers via DOM properties (not React synthetic events)
   useEffect(() => {
     if (!files.length || isLoading) return;
@@ -126,6 +132,22 @@ export default function Slideshow() {
   useEffect(() => {
     return () => stopProgressBar();
   }, [stopProgressBar]);
+
+  /**
+   * Si se borran archivos mientras el visor esta en uno de los ultimos,
+   * currentIndex queda fuera de rango: `currentFile` sale undefined, el
+   * componente devuelve null y no queda ningun timer para avanzar, dejando la
+   * pantalla en negro de forma permanente. Reencuadramos el indice.
+   */
+  useEffect(() => {
+    if (files.length > 0 && currentIndex >= files.length) {
+      setCurrentIndex(0);
+      setSlideKey((k) => k + 1);
+      setIsLoading(true);
+      setFadeOut(false);
+      setProgress(0);
+    }
+  }, [files.length, currentIndex]);
 
   if (files.length === 0) {
     return (

@@ -21,3 +21,7 @@ Releases/*.apk
 Releases/*.zip
 Releases/*.ipk
 Releases/*.wgt
+# Artefactos de Replit (proyecto ya no corre ahi)
+.cache
+.upm
+.local

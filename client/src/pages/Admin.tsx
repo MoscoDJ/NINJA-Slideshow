@@ -226,6 +226,7 @@ function AdminPanel() {
           const { url, key } = await apiJson("/api/upload/presign", {
             filename: file.name,
             contentType: file.type,
+            size: file.size,
           });
 
           await new Promise<void>((resolve, reject) => {
@@ -249,7 +250,7 @@ function AdminPanel() {
         } else {
           const { uploadId, key } = await apiJson(
             "/api/upload/init-multipart",
-            { filename: file.name, contentType: file.type },
+            { filename: file.name, contentType: file.type, size: file.size },
           );
 
           const totalParts = Math.ceil(file.size / PART_SIZE);
@@ -350,10 +351,13 @@ function AdminPanel() {
   const deleteMutation = useMutation({
     mutationFn: async (filename: string) => {
       setDeletingFile(filename);
-      const response = await fetch(`/api/files/${filename}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
+      const response = await fetch(
+        `/api/files/${encodeURIComponent(filename)}`,
+        {
+          method: "DELETE",
+          credentials: "include",
+        },
+      );
       if (response.status === 401) { forceReLogin(); throw new Error("Sesión expirada"); }
       if (!response.ok) throw new Error("Delete failed");
       return response.json();
@@ -401,7 +405,7 @@ function AdminPanel() {
 
   const handleDragEnd = async (event: any) => {
     const { active, over } = event;
-    if (active.id !== over.id) {
+    if (over && active.id !== over.id) {
       const oldIndex = files.findIndex((f) => f.name === active.id);
       const newIndex = files.findIndex((f) => f.name === over.id);
       if (oldIndex !== -1 && newIndex !== -1) {
