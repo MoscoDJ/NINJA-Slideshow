@@ -16,8 +16,8 @@
 # depender de ACLs. Eso ademas reactiva el Wake-on-LAN, que necesita estar en
 # la misma /24 que la pantalla. Actualizar estas IPs tras el cambio; para
 # encontrarlas: scripts/tv-discover.sh
-lgtv-it|lg|192.168.40.0|20:17:42:28:70:f2|159FED
-lgtv-diseno|lg|192.168.40.0|74:40:be:e8:a3:c2|F4117C
+lgtv-it|lg|192.168.40.173|2c:2b:f9:d8:86:82|XXXXXX
+lgtv-diseno|lg|192.168.40.0|74:40:be:e8:a3:c2|XXXXXX
 
 # La Samsung de Sala de Juntas se queda en el segmento 20 (ahi presentan los
 # jefes) y se alcanza por ACL. El WOL no le llega desde el segmento 40: usa su
@@ -26,4 +26,4 @@ samsung-juntas|samsung|192.168.20.121|d0:c2:4e:58:0a:1c|
 
 # lgtv-produccion: IP nueva sin confirmar. La MAC y la passphrase son las que
 # usaba la Pi.
-# lgtv-produccion|lg|192.168.40.0|20:17:42:cc:86:49|970C89
+# lgtv-produccion|lg|192.168.40.0|20:17:42:cc:86:49|XXXXXX
