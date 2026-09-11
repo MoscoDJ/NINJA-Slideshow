@@ -293,36 +293,93 @@ sdb shell "0 vd_appinstall ninjSlides /path/to/ninja.wgt"
 
 ---
 
-## Automatizacion (Raspberry Pi)
+## Automatizacion (host de despliegue)
 
-La Pi actua como hub de control para todas las pantallas.
-Los scripts viven en `/home/<user>/ninja-tv-deploy/` en la Pi.
+La Raspberry Pi que hacia de hub murio en junio de 2026. Su rol lo toma
+cualquier equipo con `ares-cli` y Tizen Studio; los scripts viven en
+[`scripts/`](scripts/) y ya no dependen de la Pi.
 
-### Cron (Lunes a Viernes)
+### Puesta en marcha
 
-| Hora | Accion |
-|---|---|
-| 9:00 AM | TVs se encienden (timer interno LG / IR blaster) |
-| 9:10 AM | Deploy apps en LG y Samsung |
-| 8:00 PM | Renovar sesion de Developer Mode (reinstalar) |
-| 10:50 PM | Ultima renovacion del dia |
-| 11:00 PM | Samsung se apaga via WebSocket API; LGs via timer interno |
+```bash
+cp scripts/tvs.conf.example scripts/tvs.conf   # editar IPs y passphrases
+bash scripts/setup-deploy-host.sh              # verifica todo y registra las LG
+```
 
-### Scripts en la Pi
+`tvs.conf` esta en `.gitignore`: contiene las passphrases de Developer Mode.
+
+### Scripts
 
 | Script | Funcion |
 |---|---|
-| `deploy.sh` | Reinstala app en todas las LG (ares-cli) |
-| `deploy-samsung.sh` | Reinstala app en Samsung (sdb via qemu x86) |
-| `samsung/power-off.sh` | Apaga Samsung via WebSocket API |
-| `tv-power.sh` | Enciende/apaga LGs (WOL + WebSocket) |
-| `lg-power.py` | Control de energia LG via WebSocket |
+| `setup-deploy-host.sh` | Prepara el host: ares-cli, sdb, venv, inventario, alcance |
+| `tv-deploy.sh` | Despliega en todas las pantallas (LG por ares, Samsung por sdb) |
+| `tv-power.sh` | Encendido por WOL / apagado por WebSocket |
+| `lg-power.py` | Control de energia LG via `ssap://` |
+| `samsung-power.py` | Control de energia Samsung via remote API |
+| `lib-tv.sh` | Helpers compartidos |
 
-### Setup
+Los binarios se bajan solos del release mas reciente de GitHub
+(`gh release download`) y se cachean en
+`~/.local/state/ninja-slideshow/artifacts`. Con `--tag` se fija otro release.
 
-- LG: `ares-cli` instalado nativamente (Node 20)
-- Samsung: `sdb` x86_64 ejecutado via `qemu-user-static` con `LD_LIBRARY_PATH`
-- Clave SSH de LG y token de Samsung se guardan automaticamente
+```bash
+scripts/tv-deploy.sh                  # solo las que llevan >= 12 h
+scripts/tv-deploy.sh --force          # todas
+scripts/tv-deploy.sh --only lgtv-it   # una
+scripts/tv-power.sh off               # apagar todas
+```
+
+### Cron sugerido (lunes a viernes)
+
+| Hora | Accion |
+|---|---|
+| 9:10 | `tv-deploy.sh` |
+| 20:00 | `tv-deploy.sh --force` — renueva la sesion de Developer Mode |
+| 22:50 | `tv-deploy.sh --force` — ultima renovacion |
+| 23:00 | `tv-power.sh off` |
+
+La sesion de Developer Mode de LG expira a las ~50 h; por eso se reinstala.
+
+### Diferencias respecto al setup de la Pi
+
+- **`sdb` nativo.** La Pi era ARM y ejecutaba un `sdb` x86 bajo
+  `qemu-user-static` con `LD_LIBRARY_PATH`. En un host x86_64 se usa
+  directamente el de Tizen Studio.
+- **Alcance por TCP, no por ping.** El gateway bloquea ICMP echo entre
+  subredes, asi que una pantalla encendida y alcanzable por TCP no responde al
+  ping. Los scripts de la Pi usaban `ping` y saltaban pantallas disponibles.
+- **Deteccion real de exito.** `deploy.sh` de la Pi hacia
+  `if ares-install ... | tee -a "$LOG"; then`, y el exit code de un pipeline es
+  el del ultimo comando (`tee`), que siempre triunfa. Ademas `ares-install`
+  sale con 0 incluso al fallar. El cron reporto "OK: deployed" durante meses
+  sin instalar nada: los `state/*.last` de junio eran falsos positivos. Ahora
+  se verifica la linea `Success` en la salida.
+- **Sin `pip --break-system-packages`.** `websockets` vive en un venv propio en
+  `~/.local/share/ninja-slideshow/venv`.
+- **Inventario fuera del codigo.** Las IPs y passphrases estan en `tvs.conf`,
+  no hardcodeadas en cada script.
+
+### Wake-on-LAN
+
+WOL viaja como broadcast de capa 2 y los routers no reenvian broadcasts
+dirigidos, asi que **solo funciona si el host esta en la misma subred /24 que
+la pantalla**. Con la Pi funcionaba porque vivia en la red de las pantallas.
+Desde un host en otra subred el encendido depende del timer interno de cada
+pantalla, o hace falta un equipo siempre encendido dentro de esa VLAN.
+
+### Emparejamientos
+
+Recuperados de la SD de la Pi y remapeados a las IPs estaticas nuevas:
+
+| Archivo | Contenido |
+|---|---|
+| `~/.config/ninja-slideshow/lg-keys.json` | client-key de cada LG (`ssap://`) |
+| `~/.config/ninja-slideshow/samsung-token.json` | token del remote API de Samsung |
+| `~/.ssh/<nombre>_webos` | llave SSH de Developer Mode por pantalla |
+
+Sin estos archivos, el primer emparejamiento exige aceptar un prompt
+fisicamente en cada pantalla.
 
 ---
 

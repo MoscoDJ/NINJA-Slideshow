@@ -25,3 +25,6 @@ Releases/*.wgt
 .cache
 .upm
 .local
+
+# Inventario real de pantallas: lleva passphrases de Developer Mode
+scripts/tvs.conf

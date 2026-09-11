@@ -1,0 +1,21 @@
+# Inventario de pantallas NINJA.
+#
+# Copiar a scripts/tvs.conf (ignorado por git: lleva passphrases).
+#
+# Formato:  nombre|tipo|ip|mac|passphrase
+#
+#   nombre      identificador corto, usado para el estado y las llaves SSH
+#   tipo        lg | samsung
+#   ip          IP estatica de la pantalla
+#   mac         para Wake-on-LAN (ver la nota de WOL en el README)
+#   passphrase  LG: los 6 caracteres de la app Developer Mode. Samsung: vacio.
+#
+# La passphrase de LG CAMBIA cada vez que se reactiva el Developer Mode.
+
+lgtv-it|lg|192.168.10.17|20:17:42:28:70:f2|159FED
+lgtv-diseno|lg|192.168.20.147|74:40:be:e8:a3:c2|F4117C
+samsung-juntas|samsung|192.168.20.121|d0:c2:4e:58:0a:1c|
+
+# lgtv-produccion: la IP de abajo es la que tenia con la Pi (antes de pasar a
+# IP estatica). Confirmar la nueva antes de habilitarla.
+# lgtv-produccion|lg|192.168.10.54|20:17:42:cc:86:49|970C89
