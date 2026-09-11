@@ -14,6 +14,13 @@ LOG_FILE="${TV_LOG:-$STATE_DIR/tv.log}"
 # ARM; en un host x86_64 eso ya no hace falta.
 SDB="${SDB:-$HOME/tizen-studio/tools/sdb}"
 
+# adb para dispositivos Android TV / Google TV (Chromecast con Google TV,
+# Haier, Sharp). El slideshow ahi es el APK de Flutter.
+ADB="${ADB:-$HOME/Android/Sdk/platform-tools/adb}"
+
+# Paquete y actividad del APK (mx.com.ninja.slideshow / MainActivity).
+ANDROID_PKG="${ANDROID_PKG:-mx.com.ninja.slideshow}"
+
 # Los scripts de energia necesitan `websockets`. Las distros con PEP 668
 # (externally-managed) rechazan instalarlo en el Python del sistema, asi que
 # vive en un venv propio. La Pi lo resolvia con --break-system-packages, que

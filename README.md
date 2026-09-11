@@ -314,7 +314,7 @@ bash scripts/setup-deploy-host.sh              # verifica todo y registra las LG
 |---|---|
 | `setup-deploy-host.sh` | Prepara el host: ares-cli, sdb, venv, inventario, alcance |
 | `tv-discover.sh` | Busca pantallas en una /24 por sus puertos de Developer Mode |
-| `tv-deploy.sh` | Despliega en todas las pantallas (LG por ares, Samsung por sdb) |
+| `tv-deploy.sh` | Despliega en todas: LG por ares, Samsung por sdb, Android TV por adb |
 | `tv-power.sh` | Encendido por WOL / apagado por WebSocket |
 | `lg-power.py` | Control de energia LG via `ssap://` |
 | `samsung-power.py` | Control de energia Samsung via remote API |
@@ -392,6 +392,37 @@ Tras mover una pantalla de segmento, `scripts/tv-discover.sh` la localiza
 barriendo la /24 por sus puertos de Developer Mode (9922 en LG, 26101 en
 Samsung). Busca por puerto TCP y no por ping, porque el gateway bloquea ICMP
 echo entre subredes.
+
+### Android TV / Google TV (Chromecast con Google TV, Haier, Sharp)
+
+Estos dispositivos corren el APK de Flutter y se despliegan por `adb`, no por
+`ares`/`sdb`. En el inventario van con `tipo = androidtv`:
+
+```
+chromecast-pasillo|androidtv|192.168.40.42|00:11:22:33:44:55|
+```
+
+Puesta en marcha del dispositivo (una sola vez):
+
+1. Ajustes -> Sistema -> Acerca de -> tocar "Compilacion de Android TV OS" 7
+   veces (activa Opciones de desarrollador).
+2. Ajustes -> Sistema -> Opciones de desarrollador -> Depuracion por USB/ADB: ON.
+3. `adb connect <ip>:5555` desde el host y **aceptar el prompt en la pantalla**
+   ("permitir siempre desde esta computadora"). Sin eso el estado queda
+   `unauthorized` y el deploy falla con un mensaje claro.
+4. Primer `tv-deploy.sh`: instala el APK. Abrir la app una vez y teclear
+   `https://slideshow.ninja.com.mx`.
+
+De ahi en adelante `tv-deploy.sh` reinstala con `install -r`, que **conserva la
+URL** (vive en las preferencias de la app). Los redepliegues no piden nada.
+
+Dos limites del propio Google TV, no de estos scripts:
+
+- **No auto-lanza apps sideloaded al encender.** Tras un apagado total cae al
+  home, no al slideshow. Para 24/7 hace falta un helper de auto-arranque.
+- **Se actualiza solo** de madrugada y a veces resetea Opciones de
+  desarrollador, cortando el `adb connect` (no la app). Hay que reactivar la
+  depuracion.
 
 ### Pantallas compartidas: `nolaunch`
 

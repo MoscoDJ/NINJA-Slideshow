@@ -5,10 +5,11 @@
 # Formato:  nombre|tipo|ip|mac|passphrase|opciones
 #
 #   nombre      identificador corto, usado para el estado y las llaves SSH
-#   tipo        lg | samsung
+#   tipo        lg | samsung | androidtv
 #   ip          IP estatica de la pantalla
 #   mac         para Wake-on-LAN (ver la nota de WOL en el README)
-#   passphrase  LG: los 6 caracteres de la app Developer Mode. Samsung: vacio.
+#   passphrase  LG: los 6 caracteres de la app Developer Mode.
+#               Samsung y androidtv: vacio.
 #   opciones    lista separada por comas, opcional. Soportadas:
 #                 nolaunch  instala sin traer la app a primer plano, para
 #                           pantallas compartidas donde forzar el slideshow
@@ -34,3 +35,9 @@ samsung-juntas|samsung|192.168.20.121|d0:c2:4e:58:0a:1c||nolaunch
 # lgtv-produccion: IP nueva sin confirmar. La MAC y la passphrase son las que
 # usaba la Pi.
 # lgtv-produccion|lg|192.168.40.0|20:17:42:cc:86:49|XXXXXX
+
+# Pantalla del pasillo principal (no-smart) con Chromecast con Google TV.
+# Es Android TV: se despliega por adb (mismo APK que Haier/Sharp). La MAC y la
+# IP se completan cuando este el dispositivo. Requiere activar Opciones de
+# desarrollador + depuracion ADB, y aceptar el prompt la primera vez.
+# chromecast-pasillo|androidtv|192.168.40.0|00:00:00:00:00:00|

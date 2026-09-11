@@ -21,10 +21,11 @@ fi
 echo "Barriendo ${PREFIX}.0/24 en busca de pantallas..."
 echo "  9922  = LG webOS con Developer Mode activo"
 echo "  26101 = Samsung Tizen con Developer Mode activo"
+echo "  5555  = Android TV / Google TV con depuracion ADB activa"
 echo
 
 found=0
-for port in 9922 26101; do
+for port in 9922 26101 5555; do
   for i in $(seq 1 254); do
     ip="${PREFIX}.${i}"
     ( tcp_open "$ip" "$port" 1 && echo "  ENCONTRADA  $ip:$port" ) &
