@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <widget xmlns="http://www.w3.org/ns/widgets" xmlns:tizen="http://tizen.org/ns/widgets"
-  id="http://example.com/ninja-slideshow" version="1.0.0" viewmodes="maximized">
+  id="http://example.com/ninja-slideshow" version="1.1.0" viewmodes="maximized">
   <tizen:application id="ninjSlides.NINJASlideshow" package="ninjSlides" required_version="5.0"/>
   <content src="index.html"/>
   <feature name="http://tizen.org/feature/screen.size.all"/>

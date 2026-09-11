@@ -1,6 +1,6 @@
 {
   "id": "com.ninja.slideshow",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "vendor": "Ninja",
   "type": "web",
   "main": "index.html",
@@ -11,5 +11,6 @@
   "resolution": "1920x1080",
   "transparent": false,
   "disableBackHistoryAPI": true,
-  "handlesRelaunch": true
+  "handlesRelaunch": true,
+  "requiredACG": []
 }
