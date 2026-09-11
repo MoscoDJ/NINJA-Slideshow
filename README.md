@@ -382,6 +382,47 @@ barriendo la /24 por sus puertos de Developer Mode (9922 en LG, 26101 en
 Samsung). Busca por puerto TCP y no por ping, porque el gateway bloquea ICMP
 echo entre subredes.
 
+### Puertos
+
+Verificados contra las herramientas, no de memoria: el key server de webOS
+sale de `lib/base/novacom.js` de `@webos-tools/cli`
+(`http://<host>:9991/webos_rsa`) y el de Samsung del propio binario `sdb`.
+
+**Host de deploy -> pantalla** (lo que hay que permitir en la ACL)
+
+| Pantalla | Puerto | Proto | Para que | Lo usa |
+|---|---|---|---|---|
+| LG | 9922 | TCP | SSH de Developer Mode: instalar y lanzar | `ares-install`, `ares-launch` |
+| LG | 9991 | TCP | Key server: descarga de la llave SSH | `ares-novacom --getkey` |
+| LG | 3000 | TCP | API `ssap://` sobre ws: apagado | `lg-power.py` |
+| LG | 3001 | TCP | Igual que 3000 sobre TLS | opcional, no lo usan los scripts |
+| Samsung | 26101 | TCP | sdb: push del `.wgt`, `vd_appinstall`, `execute` | `tv-deploy.sh` |
+| Samsung | 8002 | TCP | Remote API sobre wss: apagado | `samsung-power.py` |
+| Samsung | 8001 | TCP | Remote API sobre http: info del dispositivo | opcional, diagnostico |
+| Ambas | 9 y 7 | UDP | Wake-on-LAN | `tv-power.sh`, solo en la misma /24 |
+
+Lo minimo para operar una Samsung por ACL son **dos reglas**: 26101 y 8002.
+Para una LG son **tres**: 9922, 9991 y 3000.
+
+Conviene acotar el origen a la IP del host de deploy en lugar de abrir el
+segmento completo.
+
+**Pantalla -> internet** (sin esto la app arranca pero no muestra nada)
+
+| Destino | Puerto | Proto | Para que |
+|---|---|---|---|
+| Dominio del servidor | 443 | TCP | `/api/files`, `/socket.io/socket.io.js` y el WebSocket de Socket.IO |
+| `<bucket>.<region>.cdn.digitaloceanspaces.com` | 443 | TCP | Imagenes y videos |
+| DNS | 53 | UDP/TCP | Resolucion de ambos dominios |
+
+El WebSocket de Socket.IO sube por el mismo 443 con un `Upgrade`. Si un proxy
+o la ACL rompen ese upgrade, las apps de TV degradan solas a consultar cada
+30 s: siguen funcionando, pero los cambios de contenido tardan en aparecer en
+lugar de ser inmediatos.
+
+ICMP echo no hace falta: los scripts comprueban alcance por TCP. Solo conviene
+permitirlo si se quiere que `ping` sirva para diagnosticar a mano.
+
 ### Emparejamientos
 
 Recuperados de la SD de la Pi y remapeados a las IPs estaticas nuevas:
