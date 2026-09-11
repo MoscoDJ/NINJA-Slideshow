@@ -393,6 +393,27 @@ barriendo la /24 por sus puertos de Developer Mode (9922 en LG, 26101 en
 Samsung). Busca por puerto TCP y no por ping, porque el gateway bloquea ICMP
 echo entre subredes.
 
+### Samsung: el `developerIP` de la pantalla
+
+El Developer Mode de Tizen guarda la **IP del host** autorizado a conectarse.
+La pantalla acepta el TCP en el 26101 desde cualquier origen pero **corta la
+conexion** (`Connection reset by peer`) en cuanto habla el protocolo de `sdb`
+si el peer no es esa IP. El sintoma es un `failed to connect` con el puerto
+abierto, que es facil de confundir con un problema de ACL.
+
+Para comprobar cual tiene configurada, sin tocar la pantalla:
+
+```bash
+curl -s http://<ip>:8001/api/v2/ | python3 -m json.tool | grep -E "developerIP|developerMode|PowerState"
+```
+
+Al cambiar de host de deploy hay que actualizarla en la pantalla: **Apps**,
+teclear **1 2 3 4 5** en el control, poner la IP del host nuevo y reiniciar.
+
+Ese mismo endpoint sirve para saber si la pantalla esta encendida
+(`PowerState`) y si el Developer Mode esta activo (`developerMode: 1`), sin
+depender de `sdb`.
+
 ### Puertos
 
 Verificados contra las herramientas, no de memoria: el key server de webOS
