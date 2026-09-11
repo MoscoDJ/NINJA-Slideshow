@@ -106,8 +106,31 @@ mark_success() { date +%s > "$(state_file "$1")"; }
 lg_setup_device() {
   local name="$1" ip="$2" pass="$3"
 
-  ares-setup-device --add "$name" \
-    --info "{'host':'$ip','port':'9922','username':'prisoner'}" >/dev/null 2>&1 || true
+  # --add falla si la pantalla ya esta registrada, dejando la IP vieja en la
+  # configuracion; --modify la actualiza. Se intenta modificar primero y se
+  # agrega solo si no existia. La llave y la passphrase van en el registro
+  # para que ares pueda descifrar la llave privada.
+  local key="${name}_webos"
+  local info="{'host':'$ip','port':'9922','username':'prisoner','privateKey':'$key','passphrase':'$pass'}"
+
+  if ares-setup-device --list 2>/dev/null | awk '{print $1}' | grep -qx "$name"; then
+    ares-setup-device --modify "$name" --info "$info" </dev/null >/dev/null 2>&1 || true
+  else
+    ares-setup-device --add "$name" --info "$info" </dev/null >/dev/null 2>&1 || true
+  fi
+
+  # Si ya hay una llave que funciona, no hace falta volver a pedirla: el key
+  # server (TCP 9991) solo esta activo mientras "Key Server" este encendido en
+  # la app Developer Mode.
+  if [ -f "$HOME/.ssh/$key" ] && ares-device -i --device "$name" </dev/null >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if ! tcp_open "$ip" 9991 3; then
+    log "WARN: $name — key server (9991) cerrado y sin llave valida."
+    log "      Encender 'Key Server' en la app Developer Mode de la pantalla."
+    return 1
+  fi
 
   # ares-novacom pide la passphrase por stdin de forma interactiva.
   node - "$name" "$pass" <<'JS' 2>/dev/null
