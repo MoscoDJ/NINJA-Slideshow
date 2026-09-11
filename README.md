@@ -393,6 +393,23 @@ barriendo la /24 por sus puertos de Developer Mode (9922 en LG, 26101 en
 Samsung). Busca por puerto TCP y no por ping, porque el gateway bloquea ICMP
 echo entre subredes.
 
+### Pantallas compartidas: `nolaunch`
+
+`tv-deploy.sh` trae la app a primer plano despues de instalar
+(`ares-launch` en LG, `0 execute` en Samsung). En una pantalla de uso
+compartido eso puede interrumpir lo que este proyectando alguien: el cron de
+las 9:10 caeria justo al inicio de la jornada.
+
+El sexto campo de `tvs.conf` acepta `nolaunch` para instalar sin traerla al
+frente:
+
+```
+samsung-juntas|samsung|192.168.20.121|d0:c2:4e:58:0a:1c||nolaunch
+```
+
+La pantalla recibe la actualizacion y la muestra cuando alguien abra la app o
+la TV vuelva a ella, sin secuestrar una presentacion en curso.
+
 ### Samsung: el `developerIP` de la pantalla
 
 El Developer Mode de Tizen guarda la **IP del host** autorizado a conectarse.

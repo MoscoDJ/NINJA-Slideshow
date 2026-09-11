@@ -2,13 +2,17 @@
 #
 # Copiar a scripts/tvs.conf (ignorado por git: lleva passphrases).
 #
-# Formato:  nombre|tipo|ip|mac|passphrase
+# Formato:  nombre|tipo|ip|mac|passphrase|opciones
 #
 #   nombre      identificador corto, usado para el estado y las llaves SSH
 #   tipo        lg | samsung
 #   ip          IP estatica de la pantalla
 #   mac         para Wake-on-LAN (ver la nota de WOL en el README)
 #   passphrase  LG: los 6 caracteres de la app Developer Mode. Samsung: vacio.
+#   opciones    lista separada por comas, opcional. Soportadas:
+#                 nolaunch  instala sin traer la app a primer plano, para
+#                           pantallas compartidas donde forzar el slideshow
+#                           interrumpiria una presentacion en curso
 #
 # La passphrase de LG CAMBIA cada vez que se reactiva el Developer Mode.
 
@@ -25,7 +29,7 @@ lgtv-diseno|lg|192.168.40.174|74:40:be:e8:a3:c2|XXXXXX
 # La Samsung de Sala de Juntas se queda en el segmento 20 (ahi presentan los
 # jefes) y se alcanza por ACL. El WOL no le llega desde el segmento 40: usa su
 # timer interno para encender.
-samsung-juntas|samsung|192.168.20.121|d0:c2:4e:58:0a:1c|
+samsung-juntas|samsung|192.168.20.121|d0:c2:4e:58:0a:1c||nolaunch
 
 # lgtv-produccion: IP nueva sin confirmar. La MAC y la passphrase son las que
 # usaba la Pi.

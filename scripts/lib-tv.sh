@@ -68,6 +68,13 @@ tv_list() {
   grep -vE '^\s*(#|$)' "$CONF_FILE"
 }
 
+# Devuelve 0 si la pantalla declara la opcion indicada en su 6o campo.
+tv_has_opt() {
+  local opts="$1" want="$2"
+  [ -n "$opts" ] || return 1
+  printf '%s' "$opts" | tr ',' '\n' | grep -qx "$want"
+}
+
 # Carga el inventario en el arreglo TV_ENTRIES.
 #
 # Importante: NO recorrer el inventario con `while read ... < <(tv_list)`.

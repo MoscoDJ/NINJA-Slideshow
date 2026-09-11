@@ -45,7 +45,7 @@ TIZEN_PKG="ninjSlides"
 TIZEN_APP="ninjSlides.NINJASlideshow"
 
 deploy_lg() {
-  local name="$1" ip="$2" pass="$3"
+  local name="$1" ip="$2" pass="$3" opts="${4:-}"
 
   [ -n "$IPK" ] || { log "ERROR: $name — no hay .ipk en Releases/"; return 1; }
 
@@ -70,13 +70,22 @@ deploy_lg() {
     return 1
   fi
 
+  # nolaunch: instalar sin traer la app a primer plano. Pensado para
+  # pantallas compartidas (una sala de juntas) donde forzar el slideshow
+  # podria interrumpir una presentacion en curso.
+  if tv_has_opt "$opts" nolaunch; then
+    mark_success "$name"
+    log "OK: $name desplegado (sin lanzar, por 'nolaunch')"
+    return 0
+  fi
+
   ares-launch --device "$name" "$LG_APP_ID" >/dev/null 2>&1
   mark_success "$name"
   log "OK: $name desplegado y lanzado"
 }
 
 deploy_samsung() {
-  local name="$1" ip="$2"
+  local name="$1" ip="$2" opts="${3:-}"
 
   [ -n "$WGT" ] || { log "ERROR: $name — no hay .wgt firmado en Releases/"; return 1; }
   [ -x "$SDB" ] || { log "ERROR: $name — sdb no encontrado en $SDB"; return 1; }
@@ -102,6 +111,12 @@ deploy_samsung() {
     return 1
   fi
 
+  if tv_has_opt "$opts" nolaunch; then
+    mark_success "$name"
+    log "OK: $name desplegado (sin lanzar, por 'nolaunch')"
+    return 0
+  fi
+
   "$SDB" -s "$ip:26101" shell "0 execute $TIZEN_APP" >/dev/null 2>&1
   mark_success "$name"
   log "OK: $name desplegado y lanzado"
@@ -112,7 +127,7 @@ log "====== Despliegue (ipk=$(basename "${IPK:-ninguno}") wgt=$(basename "${WGT:
 ok=0; fail=0; skip=0
 load_tvs
 for entry in "${TV_ENTRIES[@]}"; do
-  IFS='|' read -r name type ip mac pass <<< "$entry"
+  IFS='|' read -r name type ip mac pass opts <<< "$entry"
   [ -n "${ONLY:-}" ] && [ "$name" != "$ONLY" ] && continue
 
   if [ "$FORCE" -eq 0 ] && ! needs_deploy "$name" "$MAX_HOURS"; then
@@ -121,8 +136,8 @@ for entry in "${TV_ENTRIES[@]}"; do
   fi
 
   case "$type" in
-    lg)      deploy_lg "$name" "$ip" "$pass"  && ok=$((ok+1)) || fail=$((fail+1)) ;;
-    samsung) deploy_samsung "$name" "$ip"     && ok=$((ok+1)) || fail=$((fail+1)) ;;
+    lg)      deploy_lg "$name" "$ip" "$pass" "${opts:-}"  && ok=$((ok+1)) || fail=$((fail+1)) ;;
+    samsung) deploy_samsung "$name" "$ip" "${opts:-}"        && ok=$((ok+1)) || fail=$((fail+1)) ;;
     *)       log "ERROR: $name — tipo desconocido '$type'"; fail=$((fail+1)) ;;
   esac
 done
