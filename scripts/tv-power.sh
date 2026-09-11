@@ -65,7 +65,7 @@ power_off() {
         log "SKIP: $name ($ip) — puerto 3000 cerrado, se usa el timer de la pantalla"
         return 1
       fi
-      if "$PYTHON" "$SCRIPT_DIR/lg-power.py" "$ip" off >>"$LOG_FILE" 2>&1; then
+      if "$PYTHON" "$SCRIPT_DIR/lg-power.py" "$ip" off --name "$name" >>"$LOG_FILE" 2>&1; then
         log "OK: $name apagada"
       else
         log "WARN: $name — apagado por WebSocket fallo"
@@ -77,7 +77,7 @@ power_off() {
         log "SKIP: $name ($ip) — puerto 8002 cerrado"
         return 1
       fi
-      if "$PYTHON" "$SCRIPT_DIR/samsung-power.py" "$ip" "$mac" off >>"$LOG_FILE" 2>&1; then
+      if "$PYTHON" "$SCRIPT_DIR/samsung-power.py" "$ip" "$mac" off --name "$name" >>"$LOG_FILE" 2>&1; then
         log "OK: $name apagada"
       else
         log "WARN: $name — apagado por WebSocket fallo"

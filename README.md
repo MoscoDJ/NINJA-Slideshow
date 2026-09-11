@@ -313,6 +313,7 @@ bash scripts/setup-deploy-host.sh              # verifica todo y registra las LG
 | Script | Funcion |
 |---|---|
 | `setup-deploy-host.sh` | Prepara el host: ares-cli, sdb, venv, inventario, alcance |
+| `tv-discover.sh` | Busca pantallas en una /24 por sus puertos de Developer Mode |
 | `tv-deploy.sh` | Despliega en todas las pantallas (LG por ares, Samsung por sdb) |
 | `tv-power.sh` | Encendido por WOL / apagado por WebSocket |
 | `lg-power.py` | Control de energia LG via `ssap://` |
@@ -360,13 +361,26 @@ La sesion de Developer Mode de LG expira a las ~50 h; por eso se reinstala.
 - **Inventario fuera del codigo.** Las IPs y passphrases estan en `tvs.conf`,
   no hardcodeadas en cada script.
 
-### Wake-on-LAN
+### Segmentacion de red
 
 WOL viaja como broadcast de capa 2 y los routers no reenvian broadcasts
-dirigidos, asi que **solo funciona si el host esta en la misma subred /24 que
-la pantalla**. Con la Pi funcionaba porque vivia en la red de las pantallas.
-Desde un host en otra subred el encendido depende del timer interno de cada
-pantalla, o hace falta un equipo siempre encendido dentro de esa VLAN.
+dirigidos, asi que **solo funciona si el host de deploy esta en la misma
+subred /24 que la pantalla**.
+
+Por eso las pantallas LG se colocan en el mismo segmento que el host de
+deploy: no hacen falta ACLs y el WOL vuelve a funcionar. `tv-power.sh` detecta
+el caso y avisa cuando el host no comparte subred con la pantalla, en lugar de
+fallar en silencio.
+
+| Pantalla | Segmento | Acceso | Encendido |
+|---|---|---|---|
+| LG (IT, Diseno, Produccion) | El del host de deploy | Directo | WOL |
+| Samsung Sala de Juntas | Separado (ahi presentan los jefes) | ACL | Timer interno |
+
+Tras mover una pantalla de segmento, `scripts/tv-discover.sh` la localiza
+barriendo la /24 por sus puertos de Developer Mode (9922 en LG, 26101 en
+Samsung). Busca por puerto TCP y no por ping, porque el gateway bloquea ICMP
+echo entre subredes.
 
 ### Emparejamientos
 
@@ -380,6 +394,11 @@ Recuperados de la SD de la Pi y remapeados a las IPs estaticas nuevas:
 
 Sin estos archivos, el primer emparejamiento exige aceptar un prompt
 fisicamente en cada pantalla.
+
+Estan indexados por **nombre de pantalla**, no por IP. Los scripts de la Pi
+usaban la IP como clave, asi que re-direccionar una pantalla perdia el
+emparejamiento; con el nombre, cambiar de segmento no cuesta nada. Las
+entradas heredadas por IP se siguen leyendo.
 
 ---
 

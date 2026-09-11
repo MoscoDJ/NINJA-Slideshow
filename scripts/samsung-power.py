@@ -1,98 +1,129 @@
 #!/usr/bin/env python3
-"""Samsung TV power control via Smart TV API + WOL"""
-import asyncio, json, ssl, socket, sys, os, time
+"""Control de energia de Samsung Tizen via el remote API + Wake-on-LAN.
 
-if len(sys.argv) < 4:
-    print("Uso: samsung-power.py <IP> <MAC> on|off")
-    sys.exit(2)
+Recuperado de la Raspberry Pi y adaptado.
 
-TV_IP, TV_MAC, ACTION = sys.argv[1], sys.argv[2], sys.argv[3]
+El token se guarda indexado por NOMBRE de pantalla, no por IP (ver la nota en
+lg-power.py). Las entradas viejas por IP se siguen leyendo.
 
-# Broadcast derivado de la IP: la version de la Pi lo tenia fijo en
-# 192.168.10.255 y la Samsung ya vive en otra subred.
-BROADCAST = TV_IP.rsplit(".", 1)[0] + ".255"
-TOKEN_FILE = os.path.expanduser("~/.config/ninja-slideshow/samsung-token.json")
+Uso: samsung-power.py <IP> <MAC> on|off [--name NOMBRE]
+"""
+import argparse
+import asyncio
+import json
+import os
+import socket
+import ssl
+import sys
 
 try:
     import websockets
 except ImportError:
     sys.exit("Falta el modulo websockets. Instalar con: pip install websockets")
 
-def load_token():
-    try:
-        with open(TOKEN_FILE) as f:
-            return json.load(f).get(TV_IP, "")
-    except:
-        return ""
+TOKEN_FILE = os.path.expanduser("~/.config/ninja-slideshow/samsung-token.json")
 
-def save_token(token):
+
+def read_tokens() -> dict:
+    try:
+        with open(TOKEN_FILE) as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+def load_token(name: str | None, ip: str) -> str:
+    tokens = read_tokens()
+    if name and name in tokens:
+        return tokens[name]
+    return tokens.get(ip, "")
+
+
+def save_token(name: str | None, ip: str, token: str) -> None:
+    tokens = read_tokens()
+    tokens[name or ip] = token
     os.makedirs(os.path.dirname(TOKEN_FILE), exist_ok=True)
-    tokens = {}
-    try:
-        with open(TOKEN_FILE) as f:
-            tokens = json.load(f)
-    except:
-        pass
-    tokens[TV_IP] = token
-    with open(TOKEN_FILE, "w") as f:
-        json.dump(tokens, f)
+    with open(TOKEN_FILE, "w") as fh:
+        json.dump(tokens, fh, indent=2)
+    os.chmod(TOKEN_FILE, 0o600)
 
-def send_wol():
-    mac = TV_MAC.replace(":", "")
-    data = b"\xff" * 6 + (bytes.fromhex(mac)) * 16
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    s.sendto(data, (BROADCAST, 9))
-    s.close()
-    print("WOL sent to " + TV_MAC)
 
-async def samsung_power_off():
-    token = load_token()
-    uri = "wss://" + TV_IP + ":8002/api/v2/channels/samsung.remote.control"
+def send_wol(mac: str, ip: str) -> None:
+    # Broadcast derivado de la IP: la version de la Pi lo tenia fijo en
+    # 192.168.10.255 y las pantallas ya viven en varias subredes.
+    bcast = ip.rsplit(".", 1)[0] + ".255"
+    packet = b"\xff" * 6 + bytes.fromhex(mac.replace(":", "")) * 16
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    for port in (9, 7):
+        sock.sendto(packet, (bcast, port))
+    sock.close()
+    print(f"WOL enviado a {mac} via {bcast}")
+
+
+async def power_off(ip: str, name: str | None) -> bool:
+    token = load_token(name, ip)
+    uri = f"wss://{ip}:8002/api/v2/channels/samsung.remote.control"
     if token:
-        uri += "?token=" + token
+        uri += f"?token={token}"
 
-    ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    ssl_ctx.check_hostname = False
-    ssl_ctx.verify_mode = ssl.CERT_NONE
+    # La TV presenta un certificado autofirmado; no hay CA que validar.
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
 
-    try:
-        async with websockets.connect(uri, ssl=ssl_ctx, open_timeout=5, close_timeout=3) as ws:
-            resp = await asyncio.wait_for(ws.recv(), timeout=10)
-            data = json.loads(resp)
+    async with websockets.connect(uri, ssl=ctx, open_timeout=5, close_timeout=3) as ws:
+        data = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
 
-            # Save token if provided
-            if "data" in data and "token" in data.get("data", {}):
-                save_token(data["data"]["token"])
-                print("Token saved")
+        new_token = data.get("data", {}).get("token")
+        if new_token and new_token != token:
+            save_token(name, ip, new_token)
+            print("Token guardado")
 
-            if data.get("event") == "ms.channel.connect":
-                # Send power off key
-                cmd = json.dumps({
+        if data.get("event") != "ms.channel.connect":
+            print(f"Respuesta inesperada: {json.dumps(data)[:120]}")
+            return False
+
+        await ws.send(
+            json.dumps(
+                {
                     "method": "ms.remote.control",
                     "params": {
                         "Cmd": "Click",
                         "DataOfCmd": "KEY_POWER",
                         "Option": "false",
-                        "TypeOfRemote": "SendRemoteKey"
-                    }
-                })
-                await ws.send(cmd)
-                await asyncio.sleep(1)
-                print("Power OFF sent")
-                return True
-            else:
-                print("Unexpected response: " + json.dumps(data)[:100])
-                return False
-    except Exception as e:
-        print("Error: " + str(e))
-        return False
+                        "TypeOfRemote": "SendRemoteKey",
+                    },
+                }
+            )
+        )
+        await asyncio.sleep(1)
+        print("KEY_POWER enviado")
+        return True
 
-if ACTION == "off":
-    result = asyncio.run(samsung_power_off())
-    print("OK" if result else "FAILED")
-elif ACTION == "on":
-    send_wol()
-    print("OK")
-else:
-    print("Usage: samsung-power.py <IP> <MAC> on|off")
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("ip")
+    ap.add_argument("mac")
+    ap.add_argument("action", choices=["on", "off"])
+    ap.add_argument("--name", help="nombre de la pantalla (indice del token)")
+    args = ap.parse_args()
+
+    if args.action == "on":
+        send_wol(args.mac, args.ip)
+        print("OK")
+        return 0
+
+    try:
+        ok = asyncio.run(power_off(args.ip, args.name))
+    except Exception as exc:
+        print(f"Error: {exc}")
+        return 1
+
+    print("OK" if ok else "FALLO")
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

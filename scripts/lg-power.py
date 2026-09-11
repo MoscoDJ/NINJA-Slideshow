@@ -1,20 +1,27 @@
 #!/usr/bin/env python3
 """Control de energia de LG webOS via WebSocket (ssap://).
 
-Recuperado de la Raspberry Pi. El client-key queda guardado tras el primer
-emparejamiento; la primera vez hay que aceptar el prompt en la pantalla.
-"""
-import asyncio, json, sys, os
+Recuperado de la Raspberry Pi y adaptado.
 
-import websockets
+El client-key se guarda indexado por NOMBRE de pantalla, no por IP: la version
+de la Pi usaba la IP como clave, asi que re-direccionar una pantalla perdia el
+emparejamiento y obligaba a aceptar el prompt fisicamente otra vez. Las
+entradas viejas indexadas por IP se siguen leyendo y se migran al nombre.
+
+Uso: lg-power.py <IP> on|off [--name NOMBRE]
+"""
+import argparse
+import asyncio
+import json
+import os
+import sys
+
+try:
+    import websockets
+except ImportError:
+    sys.exit("Falta el modulo websockets. Instalar con: pip install websockets")
 
 KEY_FILE = os.path.expanduser("~/.config/ninja-slideshow/lg-keys.json")
-if len(sys.argv) < 3:
-    print("Uso: lg-power.py <IP> on|off")
-    sys.exit(2)
-
-TV_IP = sys.argv[1]
-ACTION = sys.argv[2]
 
 REGISTER_PAYLOAD = {
     "pairingType": "PROMPT",
@@ -26,74 +33,87 @@ REGISTER_PAYLOAD = {
             "LAUNCH",
             "LAUNCH_WEBAPP",
             "READ_INSTALLED_APPS",
-            "CONTROL_AUDIO"
+            "CONTROL_AUDIO",
         ]
-    }
+    },
 }
 
-def load_key(ip):
-    try:
-        with open(KEY_FILE) as f:
-            keys = json.load(f)
-        return keys.get(ip)
-    except:
-        return None
+COMMANDS = {"off": "ssap://system/turnOff", "on": "ssap://system/turnOn"}
 
-def save_key(ip, key):
-    keys = {}
+
+def read_keys() -> dict:
     try:
-        with open(KEY_FILE) as f:
-            keys = json.load(f)
-    except:
-        pass
-    keys[ip] = key
+        with open(KEY_FILE) as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+def load_key(name: str | None, ip: str) -> str | None:
+    keys = read_keys()
+    if name and name in keys:
+        return keys[name]
+    return keys.get(ip)  # entrada heredada, indexada por IP
+
+
+def save_key(name: str | None, ip: str, key: str) -> None:
+    keys = read_keys()
+    keys[name or ip] = key
     os.makedirs(os.path.dirname(KEY_FILE), exist_ok=True)
-    with open(KEY_FILE, "w") as f:
-        json.dump(keys, f)
+    with open(KEY_FILE, "w") as fh:
+        json.dump(keys, fh, indent=2)
+    os.chmod(KEY_FILE, 0o600)
 
-async def send_command(uri_cmd):
-    uri = "ws://" + TV_IP + ":3000"
-    async with websockets.connect(uri, close_timeout=5, open_timeout=5) as ws:
-        # Register with saved key or prompt
+
+async def send_command(ip: str, uri_cmd: str, name: str | None) -> bool:
+    async with websockets.connect(
+        f"ws://{ip}:3000", open_timeout=5, close_timeout=5
+    ) as ws:
         payload = dict(REGISTER_PAYLOAD)
-        saved_key = load_key(TV_IP)
-        if saved_key:
-            payload["client-key"] = saved_key
+        saved = load_key(name, ip)
+        if saved:
+            payload["client-key"] = saved
 
-        reg = json.dumps({"type": "register", "payload": payload})
-        await ws.send(reg)
+        await ws.send(json.dumps({"type": "register", "payload": payload}))
 
-        for i in range(5):
+        for _ in range(5):
             try:
-                resp = await asyncio.wait_for(ws.recv(), timeout=15)
-                data = json.loads(resp)
-                rtype = data.get("type", "")
-
-                if rtype == "registered":
-                    client_key = data.get("payload", {}).get("client-key", "")
-                    if client_key:
-                        save_key(TV_IP, client_key)
-                        print("Paired: " + client_key[:16] + "...")
-
-                    cmd = json.dumps({"type": "request", "id": "cmd", "uri": uri_cmd})
-                    await ws.send(cmd)
-                    r = await asyncio.wait_for(ws.recv(), timeout=5)
-                    rd = json.loads(r)
-                    print("Result: " + rd.get("type", "unknown"))
-                    return rd.get("type") != "error"
-
+                data = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
             except asyncio.TimeoutError:
                 break
 
+            if data.get("type") != "registered":
+                continue
+
+            client_key = data.get("payload", {}).get("client-key", "")
+            if client_key and client_key != saved:
+                save_key(name, ip, client_key)
+                print(f"Emparejado: {client_key[:16]}...")
+
+            await ws.send(json.dumps({"type": "request", "id": "cmd", "uri": uri_cmd}))
+            result = json.loads(await asyncio.wait_for(ws.recv(), timeout=5))
+            print(f"Resultado: {result.get('type', 'desconocido')}")
+            return result.get("type") != "error"
+
     return False
 
-if ACTION == "off":
-    result = asyncio.run(send_command("ssap://system/turnOff"))
-elif ACTION == "on":
-    result = asyncio.run(send_command("ssap://system/turnOn"))
-else:
-    print("Usage: lg-power.py <IP> on|off")
-    sys.exit(1)
 
-print("OK" if result else "FAILED")
-sys.exit(0 if result else 1)
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("ip")
+    ap.add_argument("action", choices=sorted(COMMANDS))
+    ap.add_argument("--name", help="nombre de la pantalla (indice del client-key)")
+    args = ap.parse_args()
+
+    try:
+        ok = asyncio.run(send_command(args.ip, COMMANDS[args.action], args.name))
+    except Exception as exc:
+        print(f"Error: {exc}")
+        return 1
+
+    print("OK" if ok else "FALLO")
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
