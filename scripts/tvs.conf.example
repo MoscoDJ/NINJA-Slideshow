@@ -41,3 +41,6 @@ samsung-juntas|samsung|192.168.20.121|d0:c2:4e:58:0a:1c||nolaunch
 # IP se completan cuando este el dispositivo. Requiere activar Opciones de
 # desarrollador + depuracion ADB, y aceptar el prompt la primera vez.
 # chromecast-pasillo|androidtv|192.168.40.0|00:00:00:00:00:00|
+# Para que el slideshow vuelva solo tras un reinicio, habilitar el modo kiosco
+# (servicio de accesibilidad) una vez por adb; ver README, "Auto-arranque en
+# Google TV". Google TV bloquea las demas formas de auto-arranque.

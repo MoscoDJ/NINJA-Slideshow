@@ -440,12 +440,44 @@ Tres limites del propio Google TV, no de estos scripts:
 
 - **`adb tcpip 5555` no sobrevive un reinicio.** Tras apagar del todo, el
   dispositivo vuelve al puerto aleatorio de depuracion inalambrica y el cron
-  hace SKIP hasta rehacer los pasos 4-5. El emparejamiento (paso 3) si persiste.
-- **No auto-lanza apps sideloaded al encender.** Tras un apagado total cae al
-  home, no al slideshow. Para 24/7 hace falta un helper de auto-arranque.
+  hace SKIP hasta re-emparejar. En esta red el mDNS no cruza, asi que la
+  reconexion tras reinicio necesita un codigo de vinculacion nuevo desde la
+  pantalla (Depuracion inalambrica -> Vincular con codigo).
 - **Wake-on-LAN no es fiable** en estos dispositivos (no lo implementan en
   reposo profundo), y ademas usan MAC aleatorizada por red. No dependas del WOL
   para encenderlo.
+
+### Auto-arranque en Google TV (modo kiosco)
+
+Google TV bloquea las dos vias limpias de auto-arranque: el receiver
+`BOOT_COMPLETED` (restriccion "background activity launch" de Android 14) y
+fijar la app como launcher HOME (el sistema reimpone el suyo). Ambas se
+probaron y no funcionan en el Chromecast.
+
+La que si funciona sin factory reset es el **servicio de accesibilidad**
+`KioskAccessibilityService`, incluido en el APK: el sistema lo arranca en el
+boot y esta exento de la restriccion BAL, asi que relanza el slideshow cuando
+la pantalla cae al launcher, tambien tras un reinicio. Solo reacciona ante el
+launcher (no molesta en Ajustes) y no lee el contenido de la pantalla
+(`canRetrieveWindowContent=false`).
+
+Se habilita **una vez** por adb (persiste reinicios):
+
+```
+SVC=mx.com.ninja.slideshow/mx.com.ninja.slideshow.KioskAccessibilityService
+adb -s <ip>:<puerto> shell settings put secure enabled_accessibility_services "$SVC"
+adb -s <ip>:<puerto> shell settings put secure accessibility_enabled 1
+```
+
+Para desactivarlo (p. ej. para dar mantenimiento a la pantalla sin que el
+slideshow rebote):
+
+```
+adb -s <ip>:<puerto> shell settings put secure enabled_accessibility_services ""
+```
+
+Solo aplica a dispositivos Android TV / Google TV, y queda inerte mientras no
+se habilite: no cambia el comportamiento de las Haier/Sharp ni de nadie mas.
 
 ### Pantallas compartidas: `nolaunch`
 
