@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="kiosk_accessibility_desc">Mantiene el slideshow en pantalla: cuando el dispositivo sale al menu de inicio (por ejemplo tras un reinicio), vuelve a abrir NINJA Slideshow automaticamente. No lee el contenido de la pantalla.</string>
+</resources>
