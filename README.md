@@ -402,27 +402,50 @@ Estos dispositivos corren el APK de Flutter y se despliegan por `adb`, no por
 chromecast-pasillo|androidtv|192.168.40.42|00:11:22:33:44:55|
 ```
 
-Puesta en marcha del dispositivo (una sola vez):
+Puesta en marcha del dispositivo (una sola vez). En Android 11+ / Google TV
+la depuracion inalambrica usa **emparejamiento con codigo**, no el viejo
+`adb connect ip:5555` directo:
 
-1. Ajustes -> Sistema -> Acerca de -> tocar "Compilacion de Android TV OS" 7
-   veces (activa Opciones de desarrollador).
-2. Ajustes -> Sistema -> Opciones de desarrollador -> Depuracion por USB/ADB: ON.
-3. `adb connect <ip>:5555` desde el host y **aceptar el prompt en la pantalla**
-   ("permitir siempre desde esta computadora"). Sin eso el estado queda
-   `unauthorized` y el deploy falla con un mensaje claro.
-4. Primer `tv-deploy.sh`: instala el APK. Abrir la app una vez y teclear
-   `https://slideshow.ninja.com.mx`.
+1. Ajustes -> Sistema -> Acerca de -> tocar "Compilacion" 7 veces (activa
+   Opciones de desarrollador).
+2. Ajustes -> Sistema -> Opciones de desarrollador -> **Depuracion inalambrica: ON**.
+3. Dentro de Depuracion inalambrica -> "Vincular dispositivo con codigo": la
+   pantalla muestra un codigo de 6 digitos y una `ip:puerto` (puerto de
+   emparejamiento, efimero). Desde el host, antes de que caduque:
+   `adb pair <ip>:<puerto_emparejamiento> <codigo>`.
+4. Conectar al puerto de depuracion (el de la pantalla principal de Depuracion
+   inalambrica, distinto del de emparejamiento): `adb connect <ip>:<puerto>`.
+   El emparejamiento persiste reinicios; no hay prompt en pantalla como en el
+   flujo USB clasico.
+5. **Fijar el puerto estable 5555**: `adb -s <ip>:<puerto> tcpip 5555`, luego
+   `adb connect <ip>:5555`. El puerto de la depuracion inalambrica es aleatorio
+   y cambia en cada reinicio; 5555 es lo que el inventario y el cron esperan.
+6. Primer deploy: `tv-deploy.sh --only <nombre>` instala el APK. Configurar la
+   URL sin control remoto, por adb:
+   ```
+   adb -s <ip>:5555 shell monkey -p mx.com.ninja.slideshow -c android.intent.category.LAUNCHER 1
+   adb -s <ip>:5555 shell input text 'https://slideshow.ninja.com.mx'   # campo ya enfocado
+   adb -s <ip>:5555 shell input tap 960 858                             # boton Conectar (1920x1080)
+   ```
+   No usar BACK para cerrar el teclado: saca de la app. `input text` sobre el
+   campo ya enfocado no abre el teclado en pantalla.
 
 De ahi en adelante `tv-deploy.sh` reinstala con `install -r`, que **conserva la
 URL** (vive en las preferencias de la app). Los redepliegues no piden nada.
 
-Dos limites del propio Google TV, no de estos scripts:
+El campo IP del inventario acepta `ip` o `ip:puerto`; si se omite el puerto se
+asume 5555.
 
+Tres limites del propio Google TV, no de estos scripts:
+
+- **`adb tcpip 5555` no sobrevive un reinicio.** Tras apagar del todo, el
+  dispositivo vuelve al puerto aleatorio de depuracion inalambrica y el cron
+  hace SKIP hasta rehacer los pasos 4-5. El emparejamiento (paso 3) si persiste.
 - **No auto-lanza apps sideloaded al encender.** Tras un apagado total cae al
   home, no al slideshow. Para 24/7 hace falta un helper de auto-arranque.
-- **Se actualiza solo** de madrugada y a veces resetea Opciones de
-  desarrollador, cortando el `adb connect` (no la app). Hay que reactivar la
-  depuracion.
+- **Wake-on-LAN no es fiable** en estos dispositivos (no lo implementan en
+  reposo profundo), y ademas usan MAC aleatorizada por red. No dependas del WOL
+  para encenderlo.
 
 ### Pantallas compartidas: `nolaunch`
 

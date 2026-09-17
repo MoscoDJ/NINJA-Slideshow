@@ -125,57 +125,66 @@ deploy_samsung() {
 }
 
 deploy_androidtv() {
-  local name="$1" ip="$2" opts="${3:-}"
+  local name="$1" ipfield="$2" opts="${3:-}"
 
   [ -n "$APK" ] || { log "ERROR: $name — no hay .apk en Releases/"; return 1; }
   [ -x "$ADB" ] || { log "ERROR: $name — adb no encontrado en $ADB"; return 1; }
 
-  # adb sobre red escucha en 5555 cuando la depuracion esta activa.
-  if ! tcp_open "$ip" 5555; then
-    log "SKIP: $name ($ip) — puerto 5555 cerrado (apagado o depuracion ADB inactiva)"
+  # El campo IP puede traer un puerto explicito (ip:puerto); si no, 5555.
+  # 5555 es el puerto estable que se fija con 'adb tcpip 5555'; la depuracion
+  # inalambrica de Android 11+ usa un puerto aleatorio que no sirve para cron.
+  local ip port target
+  ip="${ipfield%%:*}"
+  case "$ipfield" in
+    *:*) port="${ipfield##*:}" ;;
+    *)   port=5555 ;;
+  esac
+  target="$ip:$port"
+
+  if ! tcp_open "$ip" "$port"; then
+    log "SKIP: $name ($target) — puerto cerrado (apagado, o adb tcpip $port no activo tras un reinicio)"
     return 1
   fi
 
-  log "--- $name ($ip) ---"
-  "$ADB" connect "$ip:5555" >>"$LOG_FILE" 2>&1
+  log "--- $name ($target) ---"
+  "$ADB" connect "$target" >>"$LOG_FILE" 2>&1
 
-  # La primera vez el dispositivo muestra un prompt de autorizacion que hay que
-  # aceptar en pantalla ("permitir siempre desde esta computadora"). Sin eso el
-  # estado es 'unauthorized' y el install falla.
+  # La primera vez el dispositivo pide autorizar al host (prompt en pantalla,
+  # "permitir siempre"). El emparejamiento sobrevive reinicios; el modo tcpip
+  # 5555 NO: tras un reinicio hay que volver a fijarlo.
   local state
-  state="$("$ADB" -s "$ip:5555" get-state 2>/dev/null || true)"
+  state="$("$ADB" -s "$target" get-state 2>/dev/null || true)"
   if [ "$state" != "device" ]; then
     log "ERROR: $name — adb no autorizado (estado: ${state:-sin conexion}). Aceptar el prompt de depuracion en la pantalla."
-    "$ADB" disconnect "$ip:5555" >/dev/null 2>&1 || true
+    "$ADB" disconnect "$target" >/dev/null 2>&1 || true
     return 1
   fi
 
-  # install -r reinstala conservando datos: la URL del servidor que se teclea en
-  # la app la primera vez sobrevive a los redepliegues. Solo la instalacion
-  # inicial necesita que alguien escriba slideshow.ninja.com.mx en pantalla.
+  # install -r conserva datos: la URL del servidor que se configura la primera
+  # vez sobrevive a los redepliegues. Solo la instalacion inicial necesita que
+  # alguien ponga slideshow.ninja.com.mx (se puede hacer por adb, ver README).
   local out
-  out="$("$ADB" -s "$ip:5555" install -r "$APK" 2>&1)"
+  out="$("$ADB" -s "$target" install -r "$APK" 2>&1)"
   printf '%s\n' "$out" >> "$LOG_FILE"
 
   if ! grep -q 'Success' <<< "$out"; then
     log "ERROR: $name — install fallo: $(grep -iE 'failure|error' <<< "$out" | head -1)"
-    "$ADB" disconnect "$ip:5555" >/dev/null 2>&1 || true
+    "$ADB" disconnect "$target" >/dev/null 2>&1 || true
     return 1
   fi
 
   if tv_has_opt "$opts" nolaunch; then
     mark_success "$name"
     log "OK: $name desplegado (sin lanzar, por 'nolaunch')"
-    "$ADB" disconnect "$ip:5555" >/dev/null 2>&1 || true
+    "$ADB" disconnect "$target" >/dev/null 2>&1 || true
     return 0
   fi
 
-  # monkey lanza la actividad LAUNCHER sin depender del nombre exacto de la
-  # activity, mas robusto que am start si el APK cambia de estructura.
-  "$ADB" -s "$ip:5555" shell monkey -p "$ANDROID_PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+  # monkey lanza la actividad LAUNCHER sin depender del nombre exacto.
+  "$ADB" -s "$target" shell monkey -p "$ANDROID_PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
   mark_success "$name"
   log "OK: $name desplegado y lanzado"
-  "$ADB" disconnect "$ip:5555" >/dev/null 2>&1 || true
+  "$ADB" disconnect "$target" >/dev/null 2>&1 || true
 }
 
 log "====== Despliegue (ipk=$(basename "${IPK:-ninguno}") wgt=$(basename "${WGT:-ninguno}")) ======"
