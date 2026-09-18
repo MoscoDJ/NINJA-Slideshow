@@ -14,6 +14,9 @@
 #                 nolaunch  instala sin traer la app a primer plano, para
 #                           pantallas compartidas donde forzar el slideshow
 #                           interrumpiria una presentacion en curso
+#                 kiosk     (androidtv) re-habilita el servicio de auto-arranque
+#                           tras cada install: Android 14 lo apaga al actualizar
+#                           el APK
 #
 # La passphrase de LG CAMBIA cada vez que se reactiva el Developer Mode.
 
@@ -40,7 +43,7 @@ samsung-juntas|samsung|192.168.20.121|d0:c2:4e:58:0a:1c||nolaunch
 # Es Android TV: se despliega por adb (mismo APK que Haier/Sharp). La MAC y la
 # IP se completan cuando este el dispositivo. Requiere activar Opciones de
 # desarrollador + depuracion ADB, y aceptar el prompt la primera vez.
-# chromecast-pasillo|androidtv|192.168.40.0|00:00:00:00:00:00|
+# chromecast-pasillo|androidtv|192.168.40.0|00:00:00:00:00:00||kiosk
 # Para que el slideshow vuelva solo tras un reinicio, habilitar el modo kiosco
 # (servicio de accesibilidad) una vez por adb; ver README, "Auto-arranque en
 # Google TV". Google TV bloquea las demas formas de auto-arranque.

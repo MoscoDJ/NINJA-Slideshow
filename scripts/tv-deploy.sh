@@ -173,6 +173,23 @@ deploy_androidtv() {
     return 1
   fi
 
+  # kiosk: re-aplicar el servicio de accesibilidad de auto-arranque. Android 14
+  # lo desactiva al actualizar el APK (observado en el Chromecast al pasar de
+  # 1.3.0 a 1.4.0), asi que cada deploy lo dejaria apagado en silencio si no
+  # se vuelve a habilitar aqui. Opt-in por pantalla: no toca Haier/Sharp.
+  if tv_has_opt "$opts" kiosk; then
+    local svc="$ANDROID_PKG/$ANDROID_PKG.KioskAccessibilityService"
+    "$ADB" -s "$target" shell "settings put secure enabled_accessibility_services $svc" >/dev/null 2>&1
+    "$ADB" -s "$target" shell "settings put secure accessibility_enabled 1" >/dev/null 2>&1
+    local got
+    got="$("$ADB" -s "$target" shell settings get secure enabled_accessibility_services 2>/dev/null | tr -d '\r')"
+    if [ "$got" = "$svc" ]; then
+      log "  kiosk: servicio de auto-arranque habilitado"
+    else
+      log "WARN: $name — no se pudo habilitar el kiosk (leido: ${got:-null})"
+    fi
+  fi
+
   if tv_has_opt "$opts" nolaunch; then
     mark_success "$name"
     log "OK: $name desplegado (sin lanzar, por 'nolaunch')"

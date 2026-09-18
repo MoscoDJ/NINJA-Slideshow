@@ -488,7 +488,10 @@ la pantalla cae al launcher, tambien tras un reinicio. Solo reacciona ante el
 launcher (no molesta en Ajustes) y no lee el contenido de la pantalla
 (`canRetrieveWindowContent=false`).
 
-Se habilita **una vez** por adb (persiste reinicios):
+Se habilita por adb y persiste reinicios, **pero Android 14 lo desactiva al
+actualizar el APK** (observado al pasar de 1.3.0 a 1.4.0). Por eso el
+inventario lleva la opcion `kiosk` en la pantalla: `tv-deploy.sh` lo vuelve a
+habilitar tras cada `install -r` y avisa si no lo consigue. A mano:
 
 ```
 SVC=mx.com.ninja.slideshow/mx.com.ninja.slideshow.KioskAccessibilityService
