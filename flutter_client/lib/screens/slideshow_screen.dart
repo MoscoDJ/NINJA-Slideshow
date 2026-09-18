@@ -33,7 +33,12 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
   bool _initialLoading = true;
   bool _playingVideo = false;
   double _fadeOpacity = 1.0;
-  double _progress = 0.0;
+  /// Progreso de la barra. Es un ValueNotifier para que sus cambios (hasta
+  /// 10 Hz en imagen, 4 Hz en video) NO reconstruyan el Stack ni la textura
+  /// de video: cada rebuild sobre la textura costaba memoria grafica que el
+  /// driver Mali de este Chromecast no libera.
+  final ValueNotifier<double> _progress = ValueNotifier<double>(0.0);
+  Timer? _videoProgressTimer;
   int _imageDuration = 15;
 
   /// true cuando el ultimo fetch fallo y aun no hay contenido: distingue
@@ -135,7 +140,7 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
     if (_files.isEmpty) return;
     final file = _files[_currentIndex];
     _slideStartTime = DateTime.now();
-    _progress = 0.0;
+    _progress.value = 0.0;
 
     if (file.isVideo) {
       if (_useExternalMpv) {
@@ -157,7 +162,7 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
       final elapsed =
           DateTime.now().difference(_slideStartTime!).inMilliseconds;
       final total = _imageDuration * 1000;
-      setState(() => _progress = (elapsed / total).clamp(0.0, 1.0));
+      _progress.value = (elapsed / total).clamp(0.0, 1.0);
     });
   }
 
@@ -167,16 +172,17 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
 
   Future<void> _playVideoInApp(SlideFile file) async {
     final localPath = _cache.getCachedPath(file);
+    // textureView (default). Se probo platformView (1.4.4): misma fuga de
+    // memoria y las capturas durante video salian negras, asi que se revirtio.
+    // La fuga en si sigue abierta; ver README, "Fuga de memoria en Android TV".
     final controller = (localPath != null && File(localPath).existsSync())
         ? VideoPlayerController.file(File(localPath))
         : VideoPlayerController.networkUrl(Uri.parse(file.url));
 
     _videoController = controller;
     _videoFinishing = false;
-    setState(() {
-      _playingVideo = true;
-      _progress = 0.0;
-    });
+    _progress.value = 0.0;
+    setState(() => _playingVideo = true);
 
     try {
       await controller.initialize();
@@ -187,9 +193,17 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
       // Pantalla de senalizacion: sin audio, como en las apps de TV.
       await controller.setVolume(0);
       await controller.setLooping(false);
+      // Un solo rebuild al quedar lista la textura; despues, ninguno por frame.
       controller.addListener(_onVideoTick);
       await controller.play();
       if (mounted) setState(() {});
+      _videoProgressTimer?.cancel();
+      _videoProgressTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
+        final v = _videoController?.value;
+        if (v == null || !v.isInitialized || v.duration <= Duration.zero) return;
+        _progress.value =
+            (v.position.inMilliseconds / v.duration.inMilliseconds).clamp(0.0, 1.0);
+      });
     } catch (e) {
       // Archivo corrupto, codec no soportado o red caida: no bloquear el
       // carrusel. Pequena espera para no entrar en bucle cerrado.
@@ -200,21 +214,13 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
     }
   }
 
+  /// Solo error y fin. Nada de setState aqui: el reproductor notifica hasta
+  /// 60 veces por segundo y reconstruir la textura en cada una es lo que
+  /// fugaba memoria grafica.
   void _onVideoTick() {
-    final controller = _videoController;
-    if (controller == null || _disposed) return;
-    final v = controller.value;
-
-    if (v.hasError) {
-      _finishVideo();
-      return;
-    }
-    if (!v.isInitialized || v.duration <= Duration.zero) return;
-
-    final p = v.position.inMilliseconds / v.duration.inMilliseconds;
-    if (mounted) setState(() => _progress = p.clamp(0.0, 1.0));
-
-    if (v.isCompleted) _finishVideo();
+    final v = _videoController?.value;
+    if (v == null || _disposed) return;
+    if (v.hasError || v.isCompleted) _finishVideo();
   }
 
   void _finishVideo() {
@@ -227,6 +233,8 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
   }
 
   void _disposeVideo() {
+    _videoProgressTimer?.cancel();
+    _videoProgressTimer = null;
     final c = _videoController;
     _videoController = null;
     if (c != null) {
@@ -245,10 +253,8 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
         ? localPath
         : file.url;
 
-    setState(() {
-      _playingVideo = true;
-      _progress = 0.0;
-    });
+    _progress.value = 0.0;
+    setState(() => _playingVideo = true);
 
     try {
       _mpvProcess = await Process.start('mpv', [
@@ -285,10 +291,10 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
 
     Future.delayed(const Duration(milliseconds: 800), () {
       if (_disposed) return;
+      _progress.value = 0.0;
       setState(() {
         _currentIndex = (_currentIndex + 1) % _files.length;
         _fadeOpacity = 1.0;
-        _progress = 0.0;
       });
       _startCurrentSlide();
     });
@@ -309,6 +315,7 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
     _pollTimer?.cancel();
     _disposeVideo();
     _killMpv();
+    _progress.dispose();
     _socketSub?.cancel();
     _socket.dispose();
     super.dispose();
@@ -339,23 +346,40 @@ class _SlideshowScreenState extends State<SlideshowScreen> {
                 _buildEmpty()
               else if (externalVideoActive)
                 const SizedBox.expand()
+              else if (_playingVideo)
+                // Sin AnimatedOpacity alrededor de la textura: una capa de
+                // opacidad sobre una textura de plataforma la manda offscreen
+                // en cada frame, y este driver no devuelve esa memoria.
+                _buildVideo()
               else
                 AnimatedOpacity(
                   opacity: _fadeOpacity,
                   duration: const Duration(milliseconds: 800),
-                  child: _playingVideo ? _buildVideo() : _buildSlide(),
+                  child: _buildSlide(),
+                ),
+              // Fundido del video como velo negro ENCIMA (barato).
+              if (_playingVideo)
+                IgnorePointer(
+                  child: AnimatedOpacity(
+                    opacity: 1.0 - _fadeOpacity,
+                    duration: const Duration(milliseconds: 800),
+                    child: const ColoredBox(color: Colors.black),
+                  ),
                 ),
               if (!externalVideoActive)
                 Positioned(
                   top: 0,
                   left: 0,
                   right: 0,
-                  child: LinearProgressIndicator(
-                    value: _progress,
-                    minHeight: 3,
-                    backgroundColor: Colors.black26,
-                    valueColor: const AlwaysStoppedAnimation<Color>(
-                        Color(0xFFEC1C24)),
+                  child: ValueListenableBuilder<double>(
+                    valueListenable: _progress,
+                    builder: (context, value, child) => LinearProgressIndicator(
+                      value: value,
+                      minHeight: 3,
+                      backgroundColor: Colors.black26,
+                      valueColor: const AlwaysStoppedAnimation<Color>(
+                          Color(0xFFEC1C24)),
+                    ),
                   ),
                 ),
               Positioned(

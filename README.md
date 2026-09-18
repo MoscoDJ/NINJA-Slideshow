@@ -491,6 +491,39 @@ Como cinturon, la opcion `kiosk` del inventario fija en cada deploy
 `screen_off_timeout` al maximo y desactiva el salvapantallas, por si una build
 futura perdiera el flag.
 
+### Fuga de memoria en Android TV con video (ABIERTA)
+
+**Sintoma.** En el Chromecast HD (Google TV, Android 14, 1.4 GB) el proceso
+crece ~3.3-3.7 MB/s mientras reproduce video y el sistema lo mata por
+`LOW_MEMORY` cada ~3.3 min con ~700 MB de PSS (`dumpsys activity exit-info`).
+El kiosco lo relanza en 2-50 s, asi que la pantalla se recupera sola, pero
+con huecos periodicos. Con 1.3.0 (sin video en la app) tambien moria por
+`LOW_MEMORY`, cada 7-40 min: la fuga existia, y el video la acelera ~6x.
+
+**Lo medido** (`scripts/tv-memcheck.sh`, PSS cada 5 s desde t=0):
+- Plano (~105 MB) durante la imagen 0; el crecimiento arranca con el primer
+  video y ya no para, ni durante las imagenes siguientes.
+- Crece en memoria anonima (`Unknown`, donde vive el heap de Dart); `Native`,
+  `Dalvik`, `GL mtrack`, capas de SurfaceFlinger (8) y AudioTracks (1) planos:
+  no se acumulan reproductores ni superficies. No es presion del sistema
+  (`MemAvailable` 630 MB). No son las descargas del cache (4 TCP, Native plano).
+
+**Descartado con experimentos de una sola variable** (mismo instrumento):
+- Impeller -> Skia (`EnableImpeller=false`): identico. Revertido.
+- Quitar `AnimatedOpacity` sobre la textura y el `setState` por tick (1.4.3):
+  identico. Se conservan como mejora.
+- `VideoViewType.platformView` (1.4.4): identico, y las capturas durante
+  video salian negras. Revertido a textureView (1.4.5).
+
+**Siguiente paso** (no hecho): build `--profile`, instalar (el intento fallo:
+el APK de 71 MB no quedo instalado; verificar con salida completa de
+`adb install`), tomar del logcat "Dart VM service is listening on", hacer
+`adb forward` y consultar `getMemoryUsage` y `getAllocationProfile` del
+isolate cada 20 s: si el heap de Dart sigue al PSS, la retencion es en Dart y
+el histograma dice que clase; si no, es nativo (plugin/ExoPlayer) y conviene
+probar `media_kit` o fijar/actualizar `video_player_android`. Reportarlo
+arriba con estos numeros.
+
 ### Auto-arranque en Google TV (modo kiosco)
 
 Google TV bloquea las dos vias limpias de auto-arranque: el receiver
