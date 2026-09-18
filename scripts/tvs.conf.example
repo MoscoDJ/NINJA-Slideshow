@@ -15,8 +15,9 @@
 #                           pantallas compartidas donde forzar el slideshow
 #                           interrumpiria una presentacion en curso
 #                 kiosk     (androidtv) re-habilita el servicio de auto-arranque
-#                           tras cada install: Android 14 lo apaga al actualizar
-#                           el APK
+#                           tras cada install (Android 14 lo apaga al actualizar
+#                           el APK) y fija pantalla-siempre-encendida +
+#                           salvapantallas off (Google TV trae 10 min de timeout)
 #
 # La passphrase de LG CAMBIA cada vez que se reactiva el Developer Mode.
 

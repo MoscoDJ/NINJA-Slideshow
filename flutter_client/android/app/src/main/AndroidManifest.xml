@@ -12,8 +12,7 @@
         android:label="NINJA Slideshow"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:banner="@mipmap/ic_launcher"
-        android:keepScreenOn="true">
+        android:banner="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
             android:exported="true"

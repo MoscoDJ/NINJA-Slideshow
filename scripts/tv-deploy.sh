@@ -188,6 +188,21 @@ deploy_androidtv() {
     else
       log "WARN: $name — no se pudo habilitar el kiosk (leido: ${got:-null})"
     fi
+
+    # La pantalla no debe apagarse ni entrar en salvapantallas. Google TV trae
+    # screen_off_timeout de 10 min: sin control remoto, el pasillo se apagaba
+    # cada 10 min. El APK 1.4.1 lo cubre con FLAG_KEEP_SCREEN_ON; esto es el
+    # cinturon por si una build futura lo pierde, y se re-aplica en cada deploy.
+    "$ADB" -s "$target" shell settings put system screen_off_timeout 2147483647 >/dev/null 2>&1
+    "$ADB" -s "$target" shell settings put secure screensaver_enabled 0 >/dev/null 2>&1
+    "$ADB" -s "$target" shell settings put secure screensaver_activate_on_sleep 0 >/dev/null 2>&1
+    local sot
+    sot="$("$ADB" -s "$target" shell settings get system screen_off_timeout 2>/dev/null | tr -d '\r')"
+    if [ "$sot" = "2147483647" ]; then
+      log "  kiosk: pantalla siempre encendida, salvapantallas desactivado"
+    else
+      log "WARN: $name — no se pudo fijar screen_off_timeout (leido: ${sot:-null})"
+    fi
   fi
 
   if tv_has_opt "$opts" nolaunch; then

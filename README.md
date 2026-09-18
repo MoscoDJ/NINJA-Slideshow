@@ -474,6 +474,23 @@ El primer video de cada ciclo puede tardar en arrancar (>20 s) porque se
 reproduce desde la red mientras la cache lo descarga en segundo plano; a partir
 del segundo ciclo sale del archivo local.
 
+### La pantalla se apagaba cada 10 minutos (Google TV)
+
+Google TV trae `screen_off_timeout` de 10 min: sin pulsaciones del control, la
+pantalla se apaga aunque la app siga corriendo (el aparato sigue "Awake", la
+app en primer plano y decodificando; solo el panel se apaga). Una tecla la
+devuelve. Esto hacia que la pantalla del pasillo se viera negra casi siempre.
+
+Causa en la app: el manifest tenia `android:keepScreenOn="true"` en
+`<application>`, donde ese atributo **no existe** (es de `View`/`Window`) y
+Android lo ignoraba en silencio; `WAKE_LOCK` estaba declarado pero nada lo
+adquiria. Desde el APK 1.4.1 `MainActivity` pone `FLAG_KEEP_SCREEN_ON` en la
+ventana, que es la forma correcta.
+
+Como cinturon, la opcion `kiosk` del inventario fija en cada deploy
+`screen_off_timeout` al maximo y desactiva el salvapantallas, por si una build
+futura perdiera el flag.
+
 ### Auto-arranque en Google TV (modo kiosco)
 
 Google TV bloquea las dos vias limpias de auto-arranque: el receiver
