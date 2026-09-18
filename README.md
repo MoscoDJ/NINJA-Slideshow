@@ -447,6 +447,33 @@ Tres limites del propio Google TV, no de estos scripts:
   reposo profundo), y ademas usan MAC aleatorizada por red. No dependas del WOL
   para encenderlo.
 
+### Video y resiliencia en Android TV (APK 1.4.0)
+
+Hasta 1.3.0 el cliente Flutter reproducia video lanzando **`mpv` como proceso
+externo**, un camino escrito para la Raspberry Pi (donde media_kit no funciona
+sobre la GPU VideoCore). En Android no existe `mpv`: cada video fallaba al
+instante y se saltaba. Con 21 de 25 archivos en video, la pantalla del pasillo
+mostraba el 16% del contenido.
+
+Desde 1.4.0:
+
+- **Video en la propia app** con `video_player` (ExoPlayer, decodificacion por
+  hardware). `mpv` queda solo para `Platform.isLinux` (la Pi). Sin audio, como
+  en las apps de TV.
+- **Barra de progreso tambien durante el video**, alimentada por la posicion
+  del reproductor.
+- **Nunca se queda atorado en "No hay contenido"**: si el primer fetch falla
+  (Wi-Fi aun no lista tras el relanzamiento del kiosco), reintenta con backoff
+  (5 s -> 60 s) y muestra "Sin conexion con el servidor. Reintentando..." en
+  vez del mensaje de vacio. Ademas hay un sondeo cada 60 s aunque el socket
+  este caido. Antes solo un evento del socket podia sacarlo de ese estado.
+- Un video corrupto o un codec no soportado no bloquea el carrusel: espera 2 s
+  y pasa al siguiente.
+
+El primer video de cada ciclo puede tardar en arrancar (>20 s) porque se
+reproduce desde la red mientras la cache lo descarga en segundo plano; a partir
+del segundo ciclo sale del archivo local.
+
 ### Auto-arranque en Google TV (modo kiosco)
 
 Google TV bloquea las dos vias limpias de auto-arranque: el receiver
